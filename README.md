@@ -6,7 +6,9 @@ Daily eye practice for a lazy eye, using the webcam already in your laptop. Shor
 
 ## Why
 
-Lazy-eye practice only helps if people keep doing it, and daily exercises get boring fast, especially for kids. EyeQuest turns practice into a few minutes of games a day and uses eye tracking to check that the eyes are actually doing the work. It needs no special hardware.
+Lazy-eye treatment only helps if it actually happens. In one study, children wore their patches for less than half the prescribed time, and the less they wore them, the less their vision improved. EyeQuest turns practice into a few minutes of games a day and uses eye tracking to check that the eyes are actually doing the work. It needs no special hardware.
+
+**Research:** [EVIDENCE.md](EVIDENCE.md) summarizes the published studies behind this approach, including the ones that don't support game-based treatment, and how EyeQuest could be tested. EyeQuest itself hasn't been studied yet.
 
 ## Run it
 
