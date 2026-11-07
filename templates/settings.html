@@ -50,6 +50,16 @@
       </div>
       <p class="muted small" style="margin-top:8px">Steady is calmer but slower to follow your eyes. Quick follows faster but jitters more. This takes effect on your real tracker, not in the preview.</p>
     </fieldset>
+    <h2 style="margin-top:28px">Bright stage</h2>
+    <fieldset>
+      <legend>Light background for calibration and games</legend>
+      <div class="choices row">
+        {% for value, name in tracer_options.stages.items() %}
+        <label class="choice"><input type="radio" name="tracer_stage" value="{{ value }}" {{ 'checked' if tracer.stage == value }}><span>{{ name }}</span></label>
+        {% endfor %}
+      </div>
+      <p class="muted small" style="margin-top:8px">A light background lights up your face, which helps tracking in a dim room. Automatic turns it on when the camera sees your face is too dark. Games use the same background you calibrated with, so recalibrate after changing this. A lamp in front of you still works best.</p>
+    </fieldset>
     <fieldset>
       <label class="toggle"><input type="checkbox" name="tracer_autostart" value="1" {{ 'checked' if tracer.autostart }}>
         <span>Start the camera when I open Eye Tracker<small>The tracer appears as soon as you allow the camera. Turn this off to start it with a button.</small></span>

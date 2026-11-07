@@ -1,4 +1,5 @@
 import io
+import json
 import socket
 import sys
 from datetime import date
@@ -333,71 +334,6 @@ def test_frame_cannot_be_pointed_at_another_website(world):
         assert 'src="//' not in page and 'src="/\\' not in page
 
 
-# ---------- measuring the iris from pixels ----------
-
-def drawn_eye(eye, centre, radius=16.0, size=(240, 320)):
-    """A bright eye opening with a dark iris, drawn with sub-pixel accuracy, plus landmarks."""
-    scale = 8
-    big = np.full((size[0] * scale, size[1] * scale), 60, dtype=np.uint8)
-    middle = (160 * scale, 120 * scale)
-    cv2.ellipse(big, middle, (40 * scale, 22 * scale), 0, 0, 360, 225, -1)
-    iris_at = (round((centre[0] - 0.5) * scale), round((centre[1] - 0.5) * scale))
-    cv2.circle(big, iris_at, round(radius * scale), 40, -1)
-    gray = cv2.resize(big, (size[1], size[0]), interpolation=cv2.INTER_AREA)
-
-    points = np.zeros((478, 2))
-    # The outline runs from the outer corner, over the top, to the inner corner and back.
-    around = np.pi + np.linspace(0, 2 * np.pi, 16, endpoint=False)
-    for index, angle in zip(gaze.EYE_OUTLINES[eye], around):
-        points[index] = [160 + 40 * np.cos(angle), 120 + 22 * np.sin(angle)]
-    ids = gaze.EYES[eye]
-    points[ids["outer"]], points[ids["inner"]] = [120, 120], [200, 120]
-    points[ids["top"]], points[ids["bottom"]] = [160, 98], [160, 142]
-    # The landmark is deliberately a little off, as a real one is.
-    guess = np.array([160.0, 120.0])
-    points[ids["iris"]] = guess
-    points[ids["iris"] + 1: ids["iris"] + 5] = guess + radius * np.array([[1, 0], [0, 1], [-1, 0], [0, -1]])
-    return gray, points
-
-
-@pytest.mark.parametrize("measure", [gaze.iris_dark_centre, gaze.iris_edge_centre])
-def test_pixel_measurements_see_moves_smaller_than_a_pixel(measure):
-    readings = []
-    for shift in (0.0, 0.5, 1.0, 1.5):
-        gray, points = drawn_eye("right", (160 + shift, 120 + shift))
-        readings.append(measure(gray, points, "right"))
-    readings = np.asarray(readings, dtype=float)
-    steps = np.diff(readings, axis=0)
-    assert np.allclose(steps, 0.5, atol=0.15)
-
-
-@pytest.mark.parametrize("measure", [gaze.iris_dark_centre, gaze.iris_edge_centre])
-def test_pixel_measurements_give_up_when_they_cannot_see(measure):
-    gray, points = drawn_eye("left", (160, 120))
-    assert measure(None, points, "left") is None
-    assert measure(np.full_like(gray, 128), points, "left") is None
-    small = points.copy()
-    ids = gaze.EYES["left"]
-    small[ids["iris"] + 1: ids["iris"] + 5] = small[ids["iris"]] + 1.0
-    assert measure(gray, small, "left") is None
-
-
-def test_features_fall_back_to_the_landmark_without_an_image():
-    _, points = drawn_eye("right", (160, 120))
-    features = gaze.eye_features(points, "right", [0.0] * 11)
-    assert len(features) == gaze.FEATURE_COUNT
-    assert features[gaze.DARK_X] == features[gaze.EDGE_X] == features[0]
-    assert features[gaze.DARK_Y] == features[gaze.EDGE_Y] == features[1]
-    assert features[gaze.UPPER_LID] * features[gaze.LOWER_LID] < 0
-
-
-def test_recording_is_off_unless_switched_on(world, monkeypatch):
-    client, _, _ = world
-    signup(client)
-    monkeypatch.delenv("EYEQUEST_RECORD", raising=False)
-    assert client.post("/api/calibrate/record", json={"samples": []}).status_code == 404
-
-
 # ---------- lesson path ----------
 
 def test_lessons_unlock_in_order():
@@ -525,6 +461,69 @@ def test_calibration_then_frames_report_gaze(world):
     corrected = client.post("/api/frame", data=bright_jpeg()).get_json()["left"]["gaze"]
     assert corrected[0] == pytest.approx(gaze_now[0] - 0.05, abs=0.01)
     assert client.post("/api/calibrate/check", json={"points": points, "aspect": 1.6}).status_code == 409
+
+
+def mixed_up_samples():
+    """Eye readings paired with the wrong dots, as when the person wasn't looking at them."""
+    samples = calibration_samples()
+    targets = sorted({tuple(s["target"]) for s in samples})
+    swap = dict(zip(targets, targets[::-1][3:] + targets[::-1][:3]))
+    return [{**s, "target": list(swap[tuple(s["target"])])} for s in samples]
+
+
+def check_points(shift):
+    return [
+        {"target": [x, y], "left": [x + shift, y], "right": [x + shift, y], "both": [x + shift, y]}
+        for x, y in [(0.2, 0.22), (0.8, 0.22), (0.5, 0.5), (0.2, 0.78), (0.8, 0.78)]
+    ]
+
+
+def test_a_calibration_that_cannot_follow_the_eyes_is_not_saved(world):
+    client, _, _ = world
+    signup(client)
+    client.post("/onboarding", data={"weak_eye": "left", "goal_xp": "20"})
+    result = client.post("/api/calibrate", json={"samples": mixed_up_samples(), "aspect": 1.6}).get_json()
+    assert not result["ok"] and "didn't save" in result["error"]
+    assert client.post("/api/frame", data=bright_jpeg()).get_json()["left"]["gaze"] is None
+    assert "/calibrate" in client.get("/lesson/u1l1").headers["Location"]
+
+
+def test_failing_the_accuracy_test_puts_back_the_last_good_calibration(world):
+    client, clock, _ = world
+    signup(client)
+    client.post("/onboarding", data={"weak_eye": "left", "goal_xp": "20"})
+    client.post("/api/calibrate", json={"samples": calibration_samples(), "aspect": 1.6})
+    assert client.post("/api/calibrate/check", json={"points": check_points(0.05), "aspect": 1.6}).get_json()["ok"]
+    good = client.post("/api/frame", data=bright_jpeg()).get_json()["left"]["gaze"]
+
+    clock.value = date.fromordinal(clock.value.toordinal() + 1)
+    client.post("/api/calibrate", json={"samples": calibration_samples(seed=2), "aspect": 1.6})
+    # Every test dot lands far away, at random-looking spots no shift or stretch can fix.
+    wild = [{**p, "both": [1 - p["target"][0], 1 - p["target"][1]]} for p in check_points(0)]
+    wild = [{**p, "left": p["both"], "right": p["both"]} for p in wild]
+    result = client.post("/api/calibrate/check", json={"points": wild, "aspect": 1.6}).get_json()
+    assert result["rejected"] and not result["ok"]
+    assert client.post("/api/frame", data=bright_jpeg()).get_json()["left"]["gaze"] == pytest.approx(good)
+    # The kept calibration is from yesterday, so today's lessons still ask for a new one.
+    assert "/calibrate" in client.get("/lesson/u1l1").headers["Location"]
+
+
+def test_a_failed_calibration_saved_earlier_is_not_used(tmp_path):
+    client = eyequest.create_app(tmp_path, FakeDetector(), Clock()).test_client()
+    signup(client)
+    client.post("/onboarding", data={"weak_eye": "left", "goal_xp": "20"})
+    client.post("/api/calibrate", json={"samples": calibration_samples(), "aspect": 1.6})
+    # Mark it as one that failed its accuracy test, which an older version still saved.
+    connection = eyequest.db.connect(tmp_path / "eyequest.db")
+    stored = json.loads(connection.execute("SELECT calibration FROM users").fetchone()["calibration"])
+    connection.execute("UPDATE users SET calibration = ?", (json.dumps({**stored, "checked": True, "accuracy": 0.53}),))
+    connection.commit()
+    connection.close()
+    # A fresh app, so nothing is remembered in memory from before the change.
+    client = eyequest.create_app(tmp_path, FakeDetector(), Clock()).test_client()
+    client.post("/login", data={"username": "bryan", "password": "correct horse"})
+    assert client.post("/api/frame", data=bright_jpeg()).get_json()["left"]["gaze"] is None
+    assert "/calibrate" in client.get("/lesson/u1l1").headers["Location"]
 
 
 def test_older_calibrations_must_be_redone(tmp_path):
@@ -663,6 +662,35 @@ def test_tracer_settings_save_and_reject_bad_values(world):
     assert '"shape":"ring"' in page and '"color":"#ff6b5e"' in page
 
 
+def lesson_body_class(client):
+    page = client.get("/lesson/u1l1").get_data(as_text=True)
+    return page.split('<body class="', 1)[1].split('"', 1)[0]
+
+
+def test_games_use_the_background_calibration_was_made_on(world):
+    client, _, _ = world
+    signup(client)
+    client.post("/onboarding", data={"weak_eye": "left", "goal_xp": "20"})
+    client.post("/settings", data={"weak_eye": "left", "goal_xp": "20", "tracer_stage": "off"})
+    client.post("/api/calibrate", json={"samples": calibration_samples(), "aspect": 1.6, "stage": "bright"})
+    # Calibrated on the bright stage, so games stay bright even though the setting now says off.
+    assert lesson_body_class(client) == "stage-page bright"
+    client.post("/api/calibrate", json={"samples": calibration_samples(), "aspect": 1.6, "stage": "<b>"})
+    assert lesson_body_class(client) == "stage-page"
+
+
+def test_bright_stage_setting_is_saved_and_used_with_the_mouse(world):
+    client, _, _ = world
+    signup(client)
+    client.post("/onboarding", data={"weak_eye": "left", "goal_xp": "20", "mouse_mode": "1"})
+    assert '"stage":"auto"' in client.get("/settings").get_data(as_text=True).replace(" ", "")
+    client.post("/settings", data={"weak_eye": "left", "goal_xp": "20", "mouse_mode": "1", "tracer_stage": "on"})
+    assert lesson_body_class(client) == "stage-page bright"
+    client.post("/settings", data={"weak_eye": "left", "goal_xp": "20", "mouse_mode": "1", "tracer_stage": "sideways"})
+    assert '"stage":"auto"' in client.get("/settings").get_data(as_text=True).replace(" ", "")
+    assert lesson_body_class(client) == "stage-page"
+
+
 def test_existing_databases_gain_the_tracer_column(tmp_path):
     import sqlite3
     old = sqlite3.connect(tmp_path / "eyequest.db")
@@ -672,3 +700,36 @@ def test_existing_databases_gain_the_tracer_column(tmp_path):
     eyequest.create_app(tmp_path, FakeDetector(), Clock())
     check = sqlite3.connect(tmp_path / "eyequest.db")
     assert "tracer" in [row[1] for row in check.execute("PRAGMA table_info(users)")]
+
+
+# ---------- head position guide ----------
+
+def test_head_guide_is_quiet_near_the_calibrated_position():
+    head = {"reference": gaze.head_pose(fake_matrix())}
+    assert gaze.head_guide(head, gaze.head_pose(fake_matrix(yaw=2, pitch=1.5))) is None
+    assert gaze.head_guide(None, gaze.head_pose(fake_matrix(pitch=20))) is None
+
+
+@pytest.mark.parametrize("change, advice", [
+    ({"pitch": 8}, "raise_chin"),
+    ({"pitch": -8}, "lower_chin"),
+    ({"yaw": 12}, "turn_right"),
+    ({"yaw": -12}, "turn_left"),
+])
+def test_head_guide_says_which_way_to_turn_back(change, advice):
+    head = {"reference": gaze.head_pose(fake_matrix())}
+    assert gaze.head_guide(head, gaze.head_pose(fake_matrix(**change))) == advice
+
+
+def test_head_guide_handles_moving_closer_further_and_sideways():
+    reference = gaze.head_pose(fake_matrix())
+    head = {"reference": reference}
+    moved = lambda index, amount: [v + amount if i == index else v for i, v in enumerate(reference)]
+    assert gaze.head_guide(head, moved(gaze.POSE_DISTANCE, reference[gaze.POSE_DISTANCE] * 0.3)) == "move_closer"
+    assert gaze.head_guide(head, moved(gaze.POSE_DISTANCE, -reference[gaze.POSE_DISTANCE] * 0.3)) == "move_back"
+    assert gaze.head_guide(head, moved(gaze.POSE_X, 6)) == "move_right"
+    assert gaze.head_guide(head, moved(gaze.POSE_Y, -6)) == "sit_up"
+    # The biggest drift, compared with its own limit, decides the advice.
+    both = moved(gaze.POSE_X, 3.5)
+    both[gaze.POSE_PITCH] += 12
+    assert gaze.head_guide(head, both) == "raise_chin"

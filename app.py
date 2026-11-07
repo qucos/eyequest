@@ -26,6 +26,14 @@ ALLOWED_HOSTS = {"localhost", "127.0.0.1"}
 MAX_SAMPLES = 2000
 MIN_CHECK_POINTS = 3
 TYPICAL_CLICKS = 12
+# A typical miss above this share of the screen's height is too rough to play with. Good
+# calibrations on real data scored 0.09-0.16; a failed one scored 0.44-0.53.
+MAX_ACCEPTED_MISS = 0.30
+POOR_CALIBRATION = (
+    "The tracker couldn't follow your eyes well enough, so I didn't save this calibration. "
+    "Sit about an arm's length from the screen with light on your face, close other heavy apps, "
+    "keep your head still, and look right at the center of each dot."
+)
 
 
 def _secret_key(data_dir):
@@ -126,15 +134,26 @@ def create_app(data_dir=None, detector=None, today=date.today):
         return g.db
 
     def saved_calibration(user):
-        """The user's calibration, ignoring any made before the tracker last changed."""
+        """The user's calibration, ignoring any made before the tracker last changed.
+
+        Also ignores one that failed its accuracy test, such as one saved before failures
+        were turned away.
+        """
         saved = json.loads(user["calibration"]) if user["calibration"] else {}
-        return saved if saved.get("version") == gaze.VERSION else {}
+        too_rough = saved.get("checked") and saved.get("accuracy", 0) > MAX_ACCEPTED_MISS
+        return saved if saved.get("version") == gaze.VERSION and not too_rough else {}
 
     def live_calibration(user):
         """The calibration used for every frame, kept in memory so frames stay fast."""
         if user["id"] not in model_cache:
             model_cache[user["id"]] = saved_calibration(user)
         return model_cache[user["id"]]
+
+    def lesson_stage(user, saved):
+        """Light or dark background for games: the one calibration used, if there is one."""
+        if saved.get("stage") in ("bright", "dark") and not user["mouse_mode"]:
+            return saved["stage"]
+        return "bright" if tracer_settings.load(user["tracer"])["stage"] == "on" else "dark"
 
     def store_calibration(user, saved):
         conn().execute(
@@ -302,6 +321,7 @@ def create_app(data_dir=None, detector=None, today=date.today):
                 "colors": tracer_settings.COLORS,
                 "trails": tracer_settings.TRAILS,
                 "smoothing": tracer_settings.SMOOTHING,
+                "stages": tracer_settings.STAGES,
                 "size": tracer_settings.SIZE_RANGE,
                 "opacity": tracer_settings.OPACITY_RANGE,
             },
@@ -387,6 +407,7 @@ def create_app(data_dir=None, detector=None, today=date.today):
             "steps": steps,
             "mouse": bool(g.user["mouse_mode"]),
             "radius": saved.get("radius", 0.14),
+            "stage": lesson_stage(g.user, saved),
         }
         return render_template("lesson.html", config=config)
 
@@ -475,6 +496,15 @@ def create_app(data_dir=None, detector=None, today=date.today):
         fitted = gaze.fit_calibration(samples, float(aspect))
         if fitted is None:
             return jsonify(ok=False, error="Not enough clear looks at the dots. Let's try again."), 200
+        if fitted["error"] > MAX_ACCEPTED_MISS:
+            return jsonify(ok=False, error=POOR_CALIBRATION), 200
+        # Kept so a calibration that fails its accuracy test can be undone.
+        older = json.loads(g.user["calibration"]) if g.user["calibration"] else None
+        if older:
+            older.pop("previous", None)
+        fitted["previous"] = {"calibration": older, "date": g.user["calib_date"]}
+        # Eyes look different under a bright screen, so games use the background this was made on.
+        fitted["stage"] = "bright" if body.get("stage") == "bright" else "dark"
         conn().execute(
             "UPDATE users SET calibration = ?, calib_date = ? WHERE id = ?",
             (json.dumps(fitted), today().isoformat(), g.user["id"]),
@@ -487,18 +517,6 @@ def create_app(data_dir=None, detector=None, today=date.today):
             radius=fitted["radius"],
             eyes=sorted(fitted["models"]),
         )
-
-    @app.post("/api/calibrate/record")
-    @login_required
-    def api_calibrate_record():
-        """TEMPORARY: saves calibration numbers (never images) for comparing tracking methods."""
-        if not os.environ.get("EYEQUEST_RECORD"):
-            return jsonify(ok=False), 404
-        folder = data_dir / "recordings"
-        folder.mkdir(exist_ok=True)
-        name = f"{secrets.token_hex(4)}.json"
-        (folder / name).write_text(json.dumps(request.get_json(silent=True) or {}))
-        return jsonify(ok=True)
 
     @app.post("/api/calibrate/check")
     @login_required
@@ -533,6 +551,20 @@ def create_app(data_dir=None, detector=None, today=date.today):
 
         worst = max(result["after"] for result in results.values())
         accuracy = results["both"]["after"] if "both" in results else worst
+        if accuracy > MAX_ACCEPTED_MISS:
+            # Too rough to play with, so put back whatever was there before.
+            previous = saved.get("previous") or {}
+            conn().execute(
+                "UPDATE users SET calibration = ?, calib_date = ? WHERE id = ?",
+                (
+                    json.dumps(previous["calibration"]) if previous.get("calibration") else None,
+                    previous.get("date"),
+                    g.user["id"],
+                ),
+            )
+            conn().commit()
+            model_cache.pop(g.user["id"], None)
+            return jsonify(ok=False, rejected=True, accuracy=accuracy, error=POOR_CALIBRATION)
         saved["checked"] = True
         saved["accuracy"] = accuracy
         saved["accuracy_by_eye"] = results

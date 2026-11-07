@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ config.title }} · EyeQuest{% endblock %}
-{% block body_class %}stage-page{% endblock %}
+{% block body_class %}stage-page{{ ' bright' if config.stage == 'bright' }}{% endblock %}
 {% block header %}{% endblock %}
 {% block content %}
 <canvas id="stage"></canvas>
@@ -35,6 +35,7 @@
   </div>
 </div>
 <p class="hint" id="hint" hidden></p>
+<div class="head-guide" id="head-guide" role="status" hidden></div>
 <div class="lost" id="lost" hidden>I can't see your eyes. Look back at the screen.</div>
 <div class="gap-keys" id="gap-keys" hidden>
   <button data-dir="up" aria-label="Gap up">↑</button>

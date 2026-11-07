@@ -13,6 +13,8 @@ COLORS = {
 SHAPES = {"ring": "Ring", "dot": "Dot", "cross": "Crosshair"}
 TRAILS = {"off": "Off", "short": "Short", "long": "Long"}
 SMOOTHING = {"steady": "Steady", "balanced": "Balanced", "quick": "Quick"}
+# A light background for calibration and games lights up the face in a dark room.
+STAGES = {"auto": "Automatic", "on": "On", "off": "Off"}
 SIZE_RANGE = (12, 80)
 OPACITY_RANGE = (20, 100)
 
@@ -25,6 +27,7 @@ DEFAULTS = {
     "smoothing": "balanced",
     "in_games": True,
     "autostart": True,
+    "stage": "auto",
 }
 
 
@@ -47,6 +50,7 @@ def from_form(form):
         "smoothing": _chosen(form.get("tracer_smoothing"), SMOOTHING, DEFAULTS["smoothing"]),
         "in_games": bool(form.get("tracer_in_games")),
         "autostart": bool(form.get("tracer_autostart")),
+        "stage": _chosen(form.get("tracer_stage"), STAGES, DEFAULTS["stage"]),
     }
 
 

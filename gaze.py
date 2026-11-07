@@ -6,7 +6,6 @@ on the left side of an unmirrored camera image.
 Gaze positions are fractions of the whole screen (not the browser window), so a
 calibration done in full screen stays correct in a smaller window.
 """
-import cv2
 import numpy as np
 
 # Bump this when the features or model change, so older calibrations get redone.
@@ -18,10 +17,6 @@ EYES = {
     "right": {"outer": 33, "inner": 133, "top": 159, "bottom": 145, "iris": 468},
     "left": {"outer": 263, "inner": 362, "top": 386, "bottom": 374, "iris": 473},
 }
-EYE_OUTLINES = {
-    "right": [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7],
-    "left": [263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249],
-}
 NOSE_TIP = 1
 FACE_LEFT = 234
 FACE_RIGHT = 454
@@ -29,17 +24,11 @@ FOREHEAD = 10
 CHIN = 152
 
 # Feature order: iris_x, iris_y, openness, iris_to_lids, head_x, head_y, yaw, pitch, scale,
-# then the real 3D head pose (see head_pose below), then measurements from the image's
-# own pixels: dark_x, dark_y, edge_x, edge_y, upper_lid, lower_lid.
+# then the real 3D head pose (see head_pose below), then upper_lid.
 POSE_START = 9
 POSE_END = 15
-DARK_X, DARK_Y, EDGE_X, EDGE_Y, UPPER_LID, LOWER_LID = range(15, 21)
-FEATURE_COUNT = 21
-MIN_IRIS_RADIUS = 4.0
-EDGE_RAY_DEGREES = (-60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240)
-EDGE_RAY_STEPS = 25
-MIN_EDGE_POINTS = 6
-MIN_EDGE_CONTRAST = 2.0
+UPPER_LID = 15
+FEATURE_COUNT = 16
 POSE_YAW, POSE_PITCH, POSE_ROLL, POSE_X, POSE_Y, POSE_DISTANCE = range(6)
 OPENNESS, HEAD_X, HEAD_Y, SCALE = 2, 4, 5, 8
 
@@ -65,6 +54,10 @@ EYE_SIGNAL_SIZE = 4
 # wobbles must not look like big movements (degrees, then centimeters, for the head terms).
 SIGNAL_FLOORS = (1e-6, 1e-6, 1e-6, 1e-6, 3.0, 3.0, 1.0, 1.0)
 MIN_DOT_LOOKS = 3
+# How far the head may drift from where it was during calibration before the guide speaks up:
+# degrees for turns, centimeters for moves, and a share for distance. On real data, a head tilted
+# 8 degrees up made the top of the screen miss by up to 38% of its height.
+GUIDE_LIMITS = {"pitch": 4.0, "yaw": 6.0, "x": 3.0, "y": 3.0, "distance": 0.12}
 
 
 def head_pose(matrix):
@@ -90,92 +83,7 @@ def head_pose(matrix):
     ]
 
 
-def _iris_circle(points, ids):
-    centre = points[ids["iris"]]
-    outline = points[ids["iris"] + 1: ids["iris"] + 5]
-    return centre, float(np.linalg.norm(outline - centre, axis=1).mean())
-
-
-def iris_dark_centre(gray, points, eye):
-    """Centre of the iris's dark area, measured from pixels inside the eye opening.
-
-    Returns [x, y] in image pixels, or None if the eye is too small or unclear to measure.
-    """
-    centre, radius = _iris_circle(points, EYES[eye])
-    if gray is None or radius < MIN_IRIS_RADIUS:
-        return None
-    reach = int(np.ceil(radius * 1.5))
-    x0, y0 = max(int(centre[0]) - reach, 0), max(int(centre[1]) - reach, 0)
-    crop = gray[y0: int(centre[1]) + reach + 1, x0: int(centre[0]) + reach + 1]
-    if crop.size == 0:
-        return None
-    mask = np.zeros(crop.shape, dtype=np.uint8)
-    outline = np.round(points[EYE_OUTLINES[eye]] - [x0, y0]).astype(np.int32)
-    cv2.fillPoly(mask, [outline], 1)
-    rows, cols = np.indices(crop.shape)
-    near = np.hypot(cols + 0.5 + x0 - centre[0], rows + 0.5 + y0 - centre[1]) <= radius * 1.25
-    inside = (mask > 0) & near
-    values = crop[inside]
-    if values.size < 30:
-        return None
-    limit, _ = cv2.threshold(values.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    darkest = float(np.percentile(values, 5))
-    weight = np.clip((limit - crop.astype(float)) / max(limit - darkest, 1.0), 0, 1) * inside
-    total = float(weight.sum())
-    if total < 1e-3:
-        return None
-    return [
-        float((weight * (cols + 0.5)).sum() / total) + x0,
-        float((weight * (rows + 0.5)).sum() / total) + y0,
-    ]
-
-
-def _fit_circle(edges):
-    """Least-squares circle through points. Returns (centre, radius)."""
-    terms = np.column_stack([2 * edges, np.ones(len(edges))])
-    solved = np.linalg.lstsq(terms, (edges**2).sum(axis=1), rcond=None)[0]
-    middle = solved[:2]
-    return middle, float(np.sqrt(max(solved[2] + middle @ middle, 0.0)))
-
-
-def iris_edge_centre(gray, points, eye):
-    """Centre of a circle fitted to the iris's edge, where it turns from dark to bright.
-
-    The rays skip the top of the iris, because the upper lid usually covers it. Returns
-    [x, y] in image pixels, or None if too little of the edge is clear.
-    """
-    centre, radius = _iris_circle(points, EYES[eye])
-    if gray is None or radius < MIN_IRIS_RADIUS:
-        return None
-    angles = np.radians(np.asarray(EDGE_RAY_DEGREES, dtype=float))
-    distances = np.linspace(radius * 0.55, radius * 1.45, EDGE_RAY_STEPS)
-    map_x = (centre[0] - 0.5 + np.outer(np.cos(angles), distances)).astype(np.float32)
-    map_y = (centre[1] - 0.5 + np.outer(np.sin(angles), distances)).astype(np.float32)
-    rays = cv2.remap(gray.astype(np.float32), map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    rays = cv2.GaussianBlur(rays, (5, 1), 0)
-    rise = np.diff(rays, axis=1)
-    peak = np.clip(rise.argmax(axis=1), 1, rise.shape[1] - 2)
-    lines = np.arange(len(angles))
-    low, mid, high = rise[lines, peak - 1], rise[lines, peak], rise[lines, peak + 1]
-    bend = low - 2 * mid + high
-    nudge = np.where(np.abs(bend) > 1e-6, 0.5 * (low - high) / np.where(bend == 0, 1, bend), 0.0)
-    step = distances[1] - distances[0]
-    found = distances[0] + (peak + 0.5 + np.clip(nudge, -1, 1)) * step
-    edges = (centre + found[:, None] * np.column_stack([np.cos(angles), np.sin(angles)]))[mid >= MIN_EDGE_CONTRAST]
-    if len(edges) < MIN_EDGE_POINTS:
-        return None
-    middle, size = _fit_circle(edges)
-    misses = np.abs(np.linalg.norm(edges - middle, axis=1) - size)
-    kept = edges[misses <= max(2.5 * float(np.median(misses)), radius * 0.05)]
-    if len(kept) < MIN_EDGE_POINTS:
-        return None
-    middle, size = _fit_circle(kept)
-    if not radius * 0.6 <= size <= radius * 1.4 or np.linalg.norm(middle - centre) > radius * 0.6:
-        return None
-    return [float(middle[0]), float(middle[1])]
-
-
-def eye_features(points, eye, head, gray=None):
+def eye_features(points, eye, head):
     ids = EYES[eye]
     outer, inner = points[ids["outer"]], points[ids["inner"]]
     centre = (outer + inner) / 2
@@ -200,11 +108,7 @@ def eye_features(points, eye, head, gray=None):
         float(np.linalg.norm(top - bottom)) / width,
         float((iris - (top + bottom) / 2) @ normal) / width,
         *head,
-        # If a pixel measurement isn't clear, fall back to the landmark reading.
-        *in_eye(iris_dark_centre(gray, points, eye) or iris),
-        *in_eye(iris_edge_centre(gray, points, eye) or iris),
         in_eye(top)[1],
-        in_eye(bottom)[1],
     ]
 
 
@@ -228,15 +132,15 @@ def _head_pose(points, frame_w, frame_h):
     ]
 
 
-def extract(normalized, frame_w, frame_h, matrix=None, gray=None):
+def extract(normalized, frame_w, frame_h, matrix=None):
     """Convert normalized landmarks to features for both eyes plus framing info."""
     points = np.asarray(normalized, dtype=float)[:, :2] * [frame_w, frame_h]
     pose = head_pose(matrix)
     head = _head_pose(points, frame_w, frame_h) + pose
     return {
         "pose": pose,
-        "left": eye_features(points, "left", head, gray),
-        "right": eye_features(points, "right", head, gray),
+        "left": eye_features(points, "left", head),
+        "right": eye_features(points, "right", head),
         "face_width": head[SCALE - HEAD_X],
         "nose_offset": head[0],
     }
@@ -337,6 +241,37 @@ def head_moved(head_model, pose):
         or abs(pose[POSE_PITCH] - reference[POSE_PITCH]) > pitch_limit
         or abs(pose[POSE_DISTANCE] / reference[POSE_DISTANCE] - 1) > distance_limit
     )
+
+
+def head_guide(head_model, pose):
+    """Which way to move back to the calibrated head position, or None when close enough.
+
+    Directions are the person's own: the camera image isn't mirrored, so a nose turned toward
+    the right of the image is turned to the person's left.
+    """
+    if not head_model or not pose or pose[POSE_DISTANCE] <= 0:
+        return None
+    reference = head_model["reference"]
+    if reference[POSE_DISTANCE] <= 0:
+        return None
+    drift = {
+        "pitch": pose[POSE_PITCH] - reference[POSE_PITCH],
+        "yaw": pose[POSE_YAW] - reference[POSE_YAW],
+        "x": pose[POSE_X] - reference[POSE_X],
+        "y": pose[POSE_Y] - reference[POSE_Y],
+        "distance": pose[POSE_DISTANCE] / reference[POSE_DISTANCE] - 1,
+    }
+    advice = {
+        "pitch": ("raise_chin", "lower_chin"),
+        "yaw": ("turn_right", "turn_left"),
+        "x": ("move_right", "move_left"),
+        "y": ("sit_lower", "sit_up"),
+        "distance": ("move_closer", "move_back"),
+    }
+    worst = max(drift, key=lambda name: abs(drift[name]) / GUIDE_LIMITS[name])
+    if abs(drift[worst]) <= GUIDE_LIMITS[worst]:
+        return None
+    return advice[worst][0] if drift[worst] > 0 else advice[worst][1]
 
 
 def _settled_dots(groups):

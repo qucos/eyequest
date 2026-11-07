@@ -36,11 +36,11 @@ If the install gets interrupted, run the same command again and it picks up wher
 
 1. The browser captures the camera and sends each frame to the local Python app.
 2. MediaPipe Face Landmarker finds each iris and eye corner (`tracker.py`). Frames are never saved.
-3. A daily calibration of 17 dots learns how your irises and upper eyelids move as you look around (`gaze.py`). Dots where your eye or head was still moving are shown again. It builds a fit for each eye and one for both together, which uses a straight line plus a smooth curve.
+3. A daily calibration of about a minute, with 17 dots, learns how your irises and upper eyelids move as you look around (`gaze.py`). Dots where your eye or head was still moving are shown again. It builds a fit for each eye and one for both together, which uses a straight line plus a smooth curve.
 4. An accuracy test on 7 new dots gives your score and removes any steady shift or squeeze.
 5. Before each game, a one-dot check corrects small head shifts.
 
-On the Eye Tracker screen, **Fine-tune** lets you look at any spot and click it, which corrects the tracker around that area and reports your real miss. Head tracking uses MediaPipe's 3D head pose: your real turn and tilt angles in degrees, plus your position and approximate distance from the camera. A guided calibration stage has you make small head movements while watching dots, and those dots train the same fit, so it learns what head movement does to your eye readings. The Eye Tracker screen shows your live head angles, and warns you if you've moved further than the tracker can account for.
+On the Eye Tracker screen, **Fine-tune** lets you look at any spot and click it, which corrects the tracker around that area and reports your real miss. Head tracking uses MediaPipe's 3D head pose: your real turn and tilt angles in degrees, plus your position and approximate distance from the camera. Small head movements change where your eyes sit, so the tracker remembers your head's position during calibration. During the accuracy test, in games and on the Eye Tracker screen, a short message such as "Lower your chin a little" appears if you drift more than a few degrees or centimeters from it. Test frames taken while your head is out of place don't count toward your score.
 
 Webcam tracking is much rougher than a clinical eye tracker. Hit zones grow to match the error measured during calibration. Progress numbers are useful as long-term trends, but they aren't vision measurements. Good light, a still head and full screen all help.
 

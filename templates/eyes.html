@@ -6,6 +6,7 @@
   <p class="muted">Green rings mark your irises. {% if calibrated %}The tracer shows where you're looking. Change how it looks in <a href="{{ url_for('settings') }}">Settings</a>.{% else %}<a href="{{ url_for('calibrate') }}">Calibrate</a> to see the tracer showing where you're looking.{% endif %} Your video stays on this computer and is never saved.</p>
   <button class="btn" id="camera" hidden>Turn on camera</button>
   <p class="camera-status" id="status" role="status" style="margin-top:12px"></p>
+  <div class="head-guide" id="head-guide" role="status" hidden></div>
   <div class="tune-controls" id="tune-controls" hidden>
     <button class="btn ghost" id="tune">Fine-tune</button>
     <a class="btn ghost" href="{{ url_for('calibrate') }}">Recalibrate</a>

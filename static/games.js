@@ -1,5 +1,9 @@
 // The five eye games. Each returns a promise for { score, metrics }.
-const COLORS = { sun: "#ffb627", coral: "#ff6b5e", brand: "#8577ff", ink: "#f3f1ff", dim: "#4a476e", good: "#4ccf9c" };
+// Darker shades on the bright stage, so targets stand out against a light background.
+const BRIGHT = document.body.classList.contains("bright");
+const COLORS = BRIGHT
+  ? { sun: "#d98a00", coral: "#e5483b", brand: "#5b4bdb", ink: "#2c2a4a", dim: "#cfc9dc", good: "#1f9d6b", muted: "#5f5b7a" }
+  : { sun: "#ffb627", coral: "#ff6b5e", brand: "#8577ff", ink: "#f3f1ff", dim: "#4a476e", good: "#4ccf9c", muted: "#b7b4d6" };
 
 class Stage {
   constructor(canvas, tracker, step, radius) {
@@ -343,7 +347,8 @@ const GAMES = {
       const c = stage.context;
       const x = innerWidth / 2, y = innerHeight / 2;
       flash = Math.max(0, flash - dt);
-      const shade = Math.round(20 + 225 * contrast);
+      // Full contrast is furthest from the background; faint rings sit close to it.
+      const shade = Math.round(BRIGHT ? 245 - 225 * contrast : 20 + 225 * contrast);
       const gapAngle = 0.45;  // the gap is about as wide as the ring is thick
       const facing = (directions[answer] * Math.PI) / 180;
       if (flash === 0) {
@@ -356,7 +361,7 @@ const GAMES = {
       } else {
         stage.circle(x, y, 10, flashColor);
       }
-      stage.context.fillStyle = "#b7b4d6";
+      stage.context.fillStyle = COLORS.muted;
       stage.context.font = "700 15px ui-rounded, system-ui";
       stage.context.textAlign = "center";
       stage.context.fillText(`${Math.min(trial + 1, trials)} of ${trials}`, x, innerHeight - 70);
@@ -377,6 +382,9 @@ GAMES.jellyfish = async function(stage) {
   const ctx = stage.context;
   const tracker = stage.tracker;
   const { seconds, dwell: dwellNeeded } = stage.params;
+  const sea = BRIGHT
+    ? { top: "#d8f1fb", bottom: "#a6d8ee", bits: "rgba(30,110,150,0.18)", bubble: "#1d8fb3", ring: "#d98a00", text: "#1c3550" }
+    : { top: "#07152e", bottom: "#123f60", bits: "rgba(130,230,255,0.25)", bubble: "#78e9ff", ring: "#ffe477", text: "#ffffff" };
 
   let elapsed = 0;
   let rescued = 0;
@@ -410,8 +418,8 @@ GAMES.jellyfish = async function(stage) {
 
     // Deep ocean background
     const bg = ctx.createLinearGradient(0, 0, 0, h);
-    bg.addColorStop(0, "#07152e");
-    bg.addColorStop(1, "#123f60");
+    bg.addColorStop(0, sea.top);
+    bg.addColorStop(1, sea.bottom);
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
 
@@ -419,7 +427,7 @@ GAMES.jellyfish = async function(stage) {
     for (let i = 0; i < 35; i++) {
       const x = ((i * 137.5) % w);
       const y = ((i * 83 + t * (8 + i % 5)) % h);
-      ctx.fillStyle = "rgba(130,230,255,0.25)";
+      ctx.fillStyle = sea.bits;
       ctx.beginPath();
       ctx.arc(x, h - y, 2 + i % 3, 0, Math.PI * 2);
       ctx.fill();
@@ -431,7 +439,7 @@ GAMES.jellyfish = async function(stage) {
     // Rescue bubble
     ctx.beginPath();
     ctx.arc(x, y, reach, 0, Math.PI * 2);
-    ctx.strokeStyle = "#78e9ff";
+    ctx.strokeStyle = sea.bubble;
     ctx.lineWidth = 4;
     ctx.stroke();
 
@@ -478,7 +486,7 @@ GAMES.jellyfish = async function(stage) {
     ctx.beginPath();
     ctx.arc(x, y, reach + 8, -Math.PI / 2,
       -Math.PI / 2 + Math.PI * 2 * Math.min(1, dwell / dwellNeeded));
-    ctx.strokeStyle = "#ffe477";
+    ctx.strokeStyle = sea.ring;
     ctx.lineWidth = 7;
     ctx.stroke();
 
@@ -490,7 +498,7 @@ GAMES.jellyfish = async function(stage) {
       newJelly();
     }
 
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = sea.text;
     ctx.font = "bold 24px sans-serif";
     ctx.textAlign = "left";
     ctx.fillText("🪼 Rescued: " + rescued, 30, 90);

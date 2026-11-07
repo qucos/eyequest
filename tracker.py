@@ -2,7 +2,6 @@
 
 Frames are analysed in memory and never written to disk.
 """
-import os
 import threading
 import time
 import urllib.request
@@ -96,19 +95,19 @@ class Tracker:
             self._last_ts = max(self._last_ts + 1, int(time.monotonic() * 1000))
             detected = self._detector.detect(rgb, self._last_ts)
 
+        brightness = float(frame.mean())
         if detected is None:
-            return {"face": False, "quality": "no_face", "left": None, "right": None}
+            return {"face": False, "quality": "no_face", "left": None, "right": None, "brightness": brightness}
 
         landmarks, matrix = detected
-        # TEMPORARY: the pixel measurements aren't used for gaze, so they only run while recording.
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if os.environ.get("EYEQUEST_RECORD") else None
-        found = gaze.extract(landmarks, width, height, matrix, gray)
+        found = gaze.extract(landmarks, width, height, matrix)
         pose = found["pose"]
         state = {
             "face": True,
             "quality": gaze.framing_quality(
-                found["face_width"], found["nose_offset"], float(frame.mean())
+                found["face_width"], found["nose_offset"], brightness
             ),
+            "brightness": brightness,
         }
         for eye in ("left", "right"):
             features = found[eye]
@@ -131,6 +130,7 @@ class Tracker:
             if state[eye]["gaze"]:
                 state[eye]["gaze"] = finish(state[eye]["gaze"])
         state["head_moved"] = gaze.head_moved(head_model, pose)
+        state["head_guide"] = gaze.head_guide(head_model, pose)
         state["head_pose"] = {
             "yaw": pose[gaze.POSE_YAW],
             "pitch": pose[gaze.POSE_PITCH],

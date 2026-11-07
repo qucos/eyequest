@@ -232,6 +232,15 @@ input[type=range] { display: block; width: 100%; margin-top: 6px; accent-color: 
 .stage-page { background: #14132a; color: #f3f1ff; overflow: hidden; height: 100vh; }
 .stage-page .muted { color: #b7b4d6; }
 .stage-page .btn.link { color: #b7b4d6; }
+/* Bright stage: a soft off-white instead of pure white, to light the face without glare. */
+.stage-page.bright { background: #f4f1ea; color: #2c2a4a; }
+.head-guide { position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 4; background: var(--coral); color: #fff; font-weight: 800; padding: 10px 18px; border-radius: 999px; box-shadow: 0 4px 14px rgba(0,0,0,.18); pointer-events: none; white-space: nowrap; }
+.head-guide[hidden] { display: none; }
+.stage-page.bright .muted, .stage-page.bright .btn.link, .stage-page.bright .quit,
+.stage-page.bright .hint, .stage-page.bright .tally span { color: #5f5b7a; }
+.stage-page.bright .bar { background: #ddd7ca; }
+.stage-page.bright .lost { background: rgba(255,255,255,.94); }
+.stage-page.bright .gap-keys button { background: #ffffff; color: #2c2a4a; border-color: #cfc9dc; }
 #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
 .lesson-top { position: fixed; top: 0; left: 0; right: 0; z-index: 3; display: flex; align-items: center; gap: 14px; padding: 14px 20px; }
 .quit { color: #b7b4d6; background: none; border: 0; font: inherit; font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 4px 8px; }

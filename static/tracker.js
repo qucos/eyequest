@@ -55,6 +55,22 @@ function newFilterPair(level) {
 const FRAME_MS = 1000 / 15;
 const HIDDEN_CHECK_MS = 300;
 const FRAME_WIDTH = 960;
+// Shown on pages with a #head-guide box, when the head drifts from where it was during calibration.
+const HEAD_GUIDE_TEXT = {
+  raise_chin: "Raise your chin a little",
+  lower_chin: "Lower your chin a little",
+  turn_right: "Turn your head a little to your right",
+  turn_left: "Turn your head a little to your left",
+  move_right: "Move a little to your right",
+  move_left: "Move a little to your left",
+  sit_lower: "Sit a little lower",
+  sit_up: "Sit up a little",
+  move_closer: "Move a little closer",
+  move_back: "Move back a little",
+};
+// A quick glance away shouldn't flash a message, and it should clear quickly once you're back.
+const GUIDE_SHOW_MS = 700;
+const GUIDE_HIDE_MS = 400;
 
 class EyeTracker {
   constructor({ mouse = false } = {}) {
@@ -69,6 +85,10 @@ class EyeTracker {
       both: newFilterPair(this.smoothing),
     };
     this.offset = { x: 0, y: 0 };
+    this.guideOn = true;
+    this.headGuide = null;
+    this.pendingGuide = null;
+    this.pendingSince = 0;
     this.lastSeen = 0;
     this.listeners = [];
     this.canvas = document.createElement("canvas");
@@ -131,6 +151,8 @@ class EyeTracker {
 
   async sendFrame() {
     const context = this.canvas.getContext("2d");
+    // When the picture was taken, so a frame that arrives late isn't matched to the wrong moment.
+    const capturedAt = performance.now();
     context.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
     const blob = await new Promise((resolve) => this.canvas.toBlob(resolve, "image/jpeg", 0.9));
     try {
@@ -141,7 +163,7 @@ class EyeTracker {
         location.href = "/login";
       }
       if (response.ok) {
-        this.update(await response.json());
+        this.update({ ...(await response.json()), capturedAt });
       } else {
         await waitFor(200);
       }
@@ -150,8 +172,24 @@ class EyeTracker {
     }
   }
 
+  updateGuide(key) {
+    const now = performance.now();
+    if (key !== this.pendingGuide) {
+      this.pendingGuide = key;
+      this.pendingSince = now;
+    }
+    if (now - this.pendingSince >= (key ? GUIDE_SHOW_MS : GUIDE_HIDE_MS)) this.headGuide = key;
+    const box = document.getElementById("head-guide");
+    if (box) {
+      const shown = this.guideOn ? this.headGuide : null;
+      box.hidden = !shown;
+      box.textContent = shown ? HEAD_GUIDE_TEXT[shown] || "" : "";
+    }
+  }
+
   update(state) {
     this.state = state;
+    this.updateGuide(state.face ? state.head_guide || null : null);
     if (state.face) this.lastSeen = performance.now();
     ["left", "right", "both"].forEach((eye) => {
       const point = state[eye] && state[eye].gaze;

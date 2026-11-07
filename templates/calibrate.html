@@ -8,7 +8,7 @@
   <div class="panel">
     {{ icons.mascot(76) }}
     <h1>Let's find your eyes</h1>
-    <p class="muted">Sit about an arm's length away, facing a light, with the camera near eye level. It takes about a minute and a half. Your video stays on this computer and is never saved.</p>
+    <p class="muted">Sit about an arm's length away, facing a light, with the camera near eye level. It takes about a minute. Your video stays on this computer and is never saved.</p>
     <video class="preview" id="preview" muted playsinline hidden></video>
     <p class="camera-status" id="status" role="status"></p>
     <button class="btn" id="camera">Turn on camera</button>
@@ -26,6 +26,7 @@
   </div>
 </div>
 <p class="hint" id="hint" hidden></p>
+<div class="head-guide" id="head-guide" role="status" hidden></div>
 <script>window.TRACER = {{ tracer|tojson }};</script>
 <script src="{{ url_for('static', filename='tracker.js') }}"></script>
 <script src="{{ url_for('static', filename='tracer.js') }}"></script>
