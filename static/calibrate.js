@@ -12,14 +12,18 @@ const LEARN_MS = 1100;
 const TEST_MS = 1100;
 const MIN_TEST_LOOKS = 4;
 const HEAD_DOTS = {
-  left: [[0.25, 0.3], [0.7, 0.7]],
-  right: [[0.75, 0.3], [0.3, 0.7]],
-  up: [[0.3, 0.25], [0.7, 0.6]],
-  down: [[0.7, 0.75], [0.3, 0.4]],
+  left: [[0.25, 0.2], [0.6, 0.5], [0.75, 0.8]],
+  right: [[0.75, 0.2], [0.4, 0.5], [0.25, 0.8]],
+  up: [[0.35, 0.25], [0.65, 0.45], [0.5, 0.75]],
+  down: [[0.65, 0.2], [0.35, 0.55], [0.5, 0.85]],
 };
 const HEAD_WORDS = { left: "LEFT ←", right: "RIGHT →", up: "UP ↑", down: "DOWN ↓" };
-const HEAD_TURN_DEGREES = 8;
-const HEAD_HOLD_DEGREES = 5;
+// Small, everyday head movements: big turns teach the tracker about poses nobody plays in.
+const HEAD_TURN_DEGREES = 6;
+const HEAD_TURN_LIMIT = 13;
+const HEAD_HOLD_DEGREES = 3;
+const HEAD_HOLD_LIMIT = 17;
+const HEAD_OFF_AXIS_LIMIT = 8;
 const HEAD_WAIT_MS = 7000;
 const POSE_YAW_INDEX = 9;
 const POSE_PITCH_INDEX = 10;
@@ -85,6 +89,12 @@ function turnedBy(pose, reference, direction) {
   return (pose[axis] - reference[axis]) * sign;
 }
 
+// How far the head has moved the other way, such as turning sideways during "up".
+function offAxisBy(pose, reference, direction) {
+  const axis = direction === "left" || direction === "right" ? 1 : 0;
+  return Math.abs(pose[axis] - reference[axis]);
+}
+
 function drawMessage(lines) {
   context.clearRect(0, 0, innerWidth, innerHeight);
   context.fillStyle = "#f3f1ff";
@@ -115,15 +125,26 @@ async function collectHeadTurns(reference) {
   const samples = [];
   for (const direction of Object.keys(HEAD_DOTS)) {
     await waitForPose(
-      `Turn your head a little ${HEAD_WORDS[direction]}`,
-      (pose) => turnedBy(pose, reference, direction) >= HEAD_TURN_DEGREES,
-      (pose) => `${Math.max(0, Math.round(turnedBy(pose, reference, direction)))}° of ${HEAD_TURN_DEGREES}°`,
+      `Move your head a little ${HEAD_WORDS[direction]}`,
+      (pose) => {
+        const turned = turnedBy(pose, reference, direction);
+        return turned >= HEAD_TURN_DEGREES && turned <= HEAD_TURN_LIMIT
+          && offAxisBy(pose, reference, direction) <= HEAD_OFF_AXIS_LIMIT;
+      },
+      (pose) => {
+        const turned = turnedBy(pose, reference, direction);
+        if (turned > HEAD_TURN_LIMIT) return "That's too far. Come back a little.";
+        if (offAxisBy(pose, reference, direction) > HEAD_OFF_AXIS_LIMIT) return "Move only in that direction.";
+        return `${Math.max(0, Math.round(turned))}° of ${HEAD_TURN_DEGREES}°`;
+      },
     );
     for (const target of HEAD_DOTS[direction]) {
       const onScreen = tracker.windowToScreen(target);
       await showDot(target, LEARN_MS, "#ff6b5e", (state) => {
         const pose = poseOf(state);
-        if (pose && turnedBy(pose, reference, direction) >= HEAD_HOLD_DEGREES) {
+        const turned = pose ? turnedBy(pose, reference, direction) : 0;
+        if (turned >= HEAD_HOLD_DEGREES && turned <= HEAD_HOLD_LIMIT
+            && offAxisBy(pose, reference, direction) <= HEAD_OFF_AXIS_LIMIT + 2) {
           samples.push({
             target: onScreen,
             phase: direction,
@@ -193,13 +214,22 @@ function middlePoint(looks) {
   return [median(looks.map((p) => p[0])), median(looks.map((p) => p[1]))];
 }
 
+// TEMPORARY: raw numbers from the accuracy test, for comparing tracking methods.
+const recordedTest = [];
+
 async function collectTest() {
   const points = [];
   for (const target of TEST_TARGETS) {
     const looks = { left: [], right: [], both: [] };
+    const onScreen = tracker.windowToScreen(target);
     await showDot(target, TEST_MS, "#4ccf9c", (state) => {
       ["left", "right", "both"].forEach((eye) => {
         if (state[eye] && state[eye].gaze) looks[eye].push(state[eye].gaze);
+      });
+      recordedTest.push({
+        target: onScreen,
+        left: state.left && state.left.open ? state.left.features : null,
+        right: state.right && state.right.open ? state.right.features : null,
       });
     });
     points.push({
@@ -230,18 +260,9 @@ function showDone(title, text, canContinue) {
   if (canContinue) stopTracer = startTracerOverlay(tracker, window.TRACER);
 }
 
-function headSummary(head) {
-  if (!head || head.before === null) return " I couldn't measure your head turns, so keep your head still for the best tracking.";
-  const before = Math.round(head.before * 100);
-  const after = Math.round(head.after * 100);
-  return head.used
-    ? ` With your head turned, the miss went from ${before}% to ${after}% using head tracking.`
-    : ` Head tracking didn't help this time (${before}% without, ${after}% with), so it's off. Keep your head still.`;
-}
-
-function showAccuracy(result, head) {
+function showAccuracy(result) {
   const percent = Math.round(result.accuracy * 100);
-  const miss = `On the test dots, the tracker typically missed by ${percent}% of your screen's height.${headSummary(head)}`;
+  const miss = `On the test dots, the tracker typically missed by ${percent}% of your screen's height.`;
   const seenEyes = result.eyes.filter((eye) => eye !== "both");
   const missing = seenEyes.length < 2 ? " I could only read one eye clearly, so games will use that one." : "";
   if (result.accuracy < 0.07) {
@@ -264,11 +285,12 @@ async function runCalibration() {
   drawDot([0.5, 0.5], 0, "#4a476e");
   await waitFor(3000);
   ui("hint").textContent = "Part 1 of 3: Look at each dot. Keep your head still.";
+  const calibrationStart = performance.now();
   const samples = await collectLearning();
 
   const reference = stillPose(samples);
   if (reference) {
-    ui("hint").textContent = "Part 2 of 3: Turn your head as asked, and keep your eyes on the red dots.";
+    ui("hint").textContent = "Part 2 of 3: Move your head a little, as asked, and keep your eyes on the red dots.";
     samples.push(...await collectHeadTurns(reference));
     ui("hint").textContent = "Face the screen again, the way you did at the start.";
     await waitForPose(
@@ -294,11 +316,18 @@ async function runCalibration() {
     points: await collectTest(),
     aspect: screen.width / screen.height,
   });
+  await postJson("/api/calibrate/record", {  // TEMPORARY: only saved when recording is switched on
+    samples,
+    test: recordedTest.splice(0),
+    aspect: screen.width / screen.height,
+    frame: [tracker.canvas.width, tracker.canvas.height],
+    frames_per_second: samples.length / ((performance.now() - calibrationStart) / 1000),
+  });
   if (!checked.ok) {
     showDone("Calibrated, but not tested", "I couldn't read your eyes during the accuracy test, so games will use larger hit zones. Calibrating again may help.", true);
     return;
   }
-  showAccuracy(checked, fitted.head);
+  showAccuracy(checked);
 }
 
 ui("camera").addEventListener("click", async () => {

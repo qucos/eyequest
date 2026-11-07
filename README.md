@@ -6,16 +6,21 @@ Daily eye practice for a lazy eye: webcam eye tracking, short games, logins, str
 
 ## Run it
 
+You need [Python](https://www.python.org/downloads/) 3.10 or newer. In a terminal, go to this folder and run:
+
 ```bash
-./run.sh
+python3 start.py
 ```
 
-The first run takes a minute or two to install everything. The app then opens at <http://localhost:5050>. Chrome is the safest choice. Allow the camera when your browser asks. Press Ctrl+C in the terminal to stop.
+The first run takes a few minutes to install everything, then the app opens in your browser. Allow the camera when your browser asks. Press Ctrl+C in the terminal to stop.
+
+If the install gets interrupted, run the same command again and it picks up where it left off. If port 5050 is busy, it finds another one and tells you which.
 
 ## What's inside
 
 - **Accounts:** usernames and hashed passwords, stored only on this computer. There's no email reset.
 - **Daily habit:** a lesson path, XP, a daily goal, stars, badges and a streak. You earn streak protection every 7 days, up to 2. After 4 lessons in a day, lessons stop earning XP and you're told to rest.
+- **Full screen:** your first click or key press turns on full screen, because browsers don't allow it sooner, and it stays on as you move between pages. Press Esc to see your tabs, and use the Full screen button to go back.
 - **Eye Tracker screen:** asks for the camera when it opens, then shows live markers on your irises and a tracer where you're looking (once calibrated).
 - **Custom tracer:** choose its shape, color, size, opacity, trail and movement in Settings, with a live preview.
 - **Games:**
@@ -23,6 +28,7 @@ The first run takes a minute or two to install everything. The app then opens at
   - Star Hop: jump your eyes between targets.
   - Steady Glow: hold your gaze on one spot.
   - Gap Spotter: find the gap in a ring that gets smaller and fainter. Press an arrow key to answer.
+  - Jellyfish Rescue: hold your gaze on each jellyfish until its ring fills.
 - **Solo-eye lessons:** ask you to cover your stronger eye so the lazy eye does the work.
 - **Progress:** a practice calendar, how closely each eye follows the firefly, and the smallest ring you spotted.
 
@@ -30,11 +36,11 @@ The first run takes a minute or two to install everything. The app then opens at
 
 1. The browser captures the camera and sends each frame to the local Python app.
 2. MediaPipe Face Landmarker finds each iris and eye corner (`tracker.py`). Frames are never saved.
-3. A daily calibration of 17 dots learns how your eyes and eyelids move as you look around (`gaze.py`). Dots where your eye or head was still moving are shown again. It builds a fit for each eye and one for both together, which uses a straight line plus a smooth curve.
+3. A daily calibration of 17 dots learns how your irises and upper eyelids move as you look around (`gaze.py`). Dots where your eye or head was still moving are shown again. It builds a fit for each eye and one for both together, which uses a straight line plus a smooth curve.
 4. An accuracy test on 7 new dots gives your score and removes any steady shift or squeeze.
 5. Before each game, a one-dot check corrects small head shifts.
 
-On the Eye Tracker screen, **Fine-tune** lets you look at any spot and click it, which corrects the tracker around that area and reports your real miss. Head tracking uses MediaPipe's 3D head pose: your real turn and tilt angles in degrees, plus your position and approximate distance from the camera. A guided calibration stage has you turn your head while watching dots, which teaches the tracker how far a head movement shifts your gaze on your screen. Each head direction is scored using a correction fitted to the other directions, and head correction switches off if it doesn't help. The Eye Tracker screen shows your live head angles, and warns you if you've moved further than the tracker can account for.
+On the Eye Tracker screen, **Fine-tune** lets you look at any spot and click it, which corrects the tracker around that area and reports your real miss. Head tracking uses MediaPipe's 3D head pose: your real turn and tilt angles in degrees, plus your position and approximate distance from the camera. A guided calibration stage has you make small head movements while watching dots, and those dots train the same fit, so it learns what head movement does to your eye readings. The Eye Tracker screen shows your live head angles, and warns you if you've moved further than the tracker can account for.
 
 Webcam tracking is much rougher than a clinical eye tracker. Hit zones grow to match the error measured during calibration. Progress numbers are useful as long-term trends, but they aren't vision measurements. Good light, a still head and full screen all help.
 

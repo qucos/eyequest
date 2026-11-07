@@ -52,6 +52,10 @@ function newFilterPair(level) {
   return [new SteadyFilter(minCutoff, speedGain), new SteadyFilter(minCutoff, speedGain)];
 }
 
+const FRAME_MS = 1000 / 15;
+const HIDDEN_CHECK_MS = 300;
+const FRAME_WIDTH = 960;
+
 class EyeTracker {
   constructor({ mouse = false } = {}) {
     this.mouse = mouse;
@@ -68,8 +72,8 @@ class EyeTracker {
     this.lastSeen = 0;
     this.listeners = [];
     this.canvas = document.createElement("canvas");
-    this.canvas.width = 960;  // more detail around the eyes than a 640-wide frame
-    this.canvas.height = 720;
+    this.canvas.width = FRAME_WIDTH;
+    this.canvas.height = 540;
   }
 
   async start(video = null) {
@@ -96,7 +100,7 @@ class EyeTracker {
     this.video.srcObject = this.stream;
     await this.video.play();
     // Keep the camera's real shape so the face isn't stretched before tracking.
-    const shape = this.video.videoWidth ? this.video.videoHeight / this.video.videoWidth : 0.75;
+    const shape = this.video.videoWidth ? this.video.videoHeight / this.video.videoWidth : 0.5625;
     this.canvas.height = Math.round(this.canvas.width * shape);
     this.loop();
   }
@@ -112,9 +116,16 @@ class EyeTracker {
   }
 
   async loop() {
-    // One request at a time, so a slow frame can never build up a backlog.
+    // One request at a time, so a slow frame can never build up a backlog. The frame limit keeps
+    // the computer responsive, and a hidden tab has no reason to use the processor at all.
     while (this.running) {
-      await this.sendFrame();
+      if (document.hidden) {
+        await waitFor(HIDDEN_CHECK_MS);
+      } else {
+        const start = performance.now();
+        await this.sendFrame();
+        await waitFor(Math.max(0, FRAME_MS - (performance.now() - start)));
+      }
     }
   }
 
@@ -223,7 +234,8 @@ function friendlyCameraError(error) {
 
 function enterFullscreen() {
   const request = document.documentElement.requestFullscreen;
-  if (!request || document.fullscreenElement) return Promise.resolve();
+  // The frame around the app may already have full screen on.
+  if (!request || document.fullscreenElement || window.parent.document.fullscreenElement) return Promise.resolve();
   // Some browsers never answer this request, and that mustn't freeze the lesson.
   return Promise.race([request.call(document.documentElement).catch(() => {}), waitFor(800)]);
 }

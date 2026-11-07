@@ -6,16 +6,21 @@ on the left side of an unmirrored camera image.
 Gaze positions are fractions of the whole screen (not the browser window), so a
 calibration done in full screen stays correct in a smaller window.
 """
+import cv2
 import numpy as np
 
 # Bump this when the features or model change, so older calibrations get redone.
-VERSION = 4
+VERSION = 5
 
 # MediaPipe Face Landmarker indices (478-point model with irises).
 # "iris" is the centre point, and the next four indices are the iris outline.
 EYES = {
     "right": {"outer": 33, "inner": 133, "top": 159, "bottom": 145, "iris": 468},
     "left": {"outer": 263, "inner": 362, "top": 386, "bottom": 374, "iris": 473},
+}
+EYE_OUTLINES = {
+    "right": [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7],
+    "left": [263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249],
 }
 NOSE_TIP = 1
 FACE_LEFT = 234
@@ -24,9 +29,17 @@ FOREHEAD = 10
 CHIN = 152
 
 # Feature order: iris_x, iris_y, openness, iris_to_lids, head_x, head_y, yaw, pitch, scale,
-# then the real 3D head pose (see head_pose below).
+# then the real 3D head pose (see head_pose below), then measurements from the image's
+# own pixels: dark_x, dark_y, edge_x, edge_y, upper_lid, lower_lid.
 POSE_START = 9
-FEATURE_COUNT = 15
+POSE_END = 15
+DARK_X, DARK_Y, EDGE_X, EDGE_Y, UPPER_LID, LOWER_LID = range(15, 21)
+FEATURE_COUNT = 21
+MIN_IRIS_RADIUS = 4.0
+EDGE_RAY_DEGREES = (-60, -45, -30, -15, 0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180, 195, 210, 225, 240)
+EDGE_RAY_STEPS = 25
+MIN_EDGE_POINTS = 6
+MIN_EDGE_CONTRAST = 2.0
 POSE_YAW, POSE_PITCH, POSE_ROLL, POSE_X, POSE_Y, POSE_DISTANCE = range(6)
 OPENNESS, HEAD_X, HEAD_Y, SCALE = 2, 4, 5, 8
 
@@ -44,13 +57,14 @@ TUNE_REACH = 0.25
 TUNE_GAIN = 0.8
 TUNE_MAX_MISS = 0.45
 TUNE_MAX_CLICKS = 40
-# How far the head can move before the tracker warns, with and without head correction.
-MOVED_LIMITS = {True: (25.0, 20.0, 0.35), False: (8.0, 8.0, 0.2)}
-# Screen fractions per centimeter: a screen from 10 cm to 100 cm across.
-HEAD_GAIN_LIMITS = (0.01, 0.1)
-MIN_HEAD_DOTS = 4
-MIN_HEAD_LOOKS = 5
-HEAD_MUST_IMPROVE = 0.95
+# How far the head can move before the tracker warns: yaw and pitch degrees, distance share.
+MOVED_LIMITS = (15.0, 12.0, 0.25)
+# Gaze signal: iris_x, iris_y, openness, upper_lid, then yaw, pitch, head_x, head_y.
+EYE_SIGNAL_SIZE = 4
+# The smallest spread each signal is scaled by. Without head turns to learn from, tiny head
+# wobbles must not look like big movements (degrees, then centimeters, for the head terms).
+SIGNAL_FLOORS = (1e-6, 1e-6, 1e-6, 1e-6, 3.0, 3.0, 1.0, 1.0)
+MIN_DOT_LOOKS = 3
 
 
 def head_pose(matrix):
@@ -76,7 +90,92 @@ def head_pose(matrix):
     ]
 
 
-def eye_features(points, eye, head):
+def _iris_circle(points, ids):
+    centre = points[ids["iris"]]
+    outline = points[ids["iris"] + 1: ids["iris"] + 5]
+    return centre, float(np.linalg.norm(outline - centre, axis=1).mean())
+
+
+def iris_dark_centre(gray, points, eye):
+    """Centre of the iris's dark area, measured from pixels inside the eye opening.
+
+    Returns [x, y] in image pixels, or None if the eye is too small or unclear to measure.
+    """
+    centre, radius = _iris_circle(points, EYES[eye])
+    if gray is None or radius < MIN_IRIS_RADIUS:
+        return None
+    reach = int(np.ceil(radius * 1.5))
+    x0, y0 = max(int(centre[0]) - reach, 0), max(int(centre[1]) - reach, 0)
+    crop = gray[y0: int(centre[1]) + reach + 1, x0: int(centre[0]) + reach + 1]
+    if crop.size == 0:
+        return None
+    mask = np.zeros(crop.shape, dtype=np.uint8)
+    outline = np.round(points[EYE_OUTLINES[eye]] - [x0, y0]).astype(np.int32)
+    cv2.fillPoly(mask, [outline], 1)
+    rows, cols = np.indices(crop.shape)
+    near = np.hypot(cols + 0.5 + x0 - centre[0], rows + 0.5 + y0 - centre[1]) <= radius * 1.25
+    inside = (mask > 0) & near
+    values = crop[inside]
+    if values.size < 30:
+        return None
+    limit, _ = cv2.threshold(values.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    darkest = float(np.percentile(values, 5))
+    weight = np.clip((limit - crop.astype(float)) / max(limit - darkest, 1.0), 0, 1) * inside
+    total = float(weight.sum())
+    if total < 1e-3:
+        return None
+    return [
+        float((weight * (cols + 0.5)).sum() / total) + x0,
+        float((weight * (rows + 0.5)).sum() / total) + y0,
+    ]
+
+
+def _fit_circle(edges):
+    """Least-squares circle through points. Returns (centre, radius)."""
+    terms = np.column_stack([2 * edges, np.ones(len(edges))])
+    solved = np.linalg.lstsq(terms, (edges**2).sum(axis=1), rcond=None)[0]
+    middle = solved[:2]
+    return middle, float(np.sqrt(max(solved[2] + middle @ middle, 0.0)))
+
+
+def iris_edge_centre(gray, points, eye):
+    """Centre of a circle fitted to the iris's edge, where it turns from dark to bright.
+
+    The rays skip the top of the iris, because the upper lid usually covers it. Returns
+    [x, y] in image pixels, or None if too little of the edge is clear.
+    """
+    centre, radius = _iris_circle(points, EYES[eye])
+    if gray is None or radius < MIN_IRIS_RADIUS:
+        return None
+    angles = np.radians(np.asarray(EDGE_RAY_DEGREES, dtype=float))
+    distances = np.linspace(radius * 0.55, radius * 1.45, EDGE_RAY_STEPS)
+    map_x = (centre[0] - 0.5 + np.outer(np.cos(angles), distances)).astype(np.float32)
+    map_y = (centre[1] - 0.5 + np.outer(np.sin(angles), distances)).astype(np.float32)
+    rays = cv2.remap(gray.astype(np.float32), map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    rays = cv2.GaussianBlur(rays, (5, 1), 0)
+    rise = np.diff(rays, axis=1)
+    peak = np.clip(rise.argmax(axis=1), 1, rise.shape[1] - 2)
+    lines = np.arange(len(angles))
+    low, mid, high = rise[lines, peak - 1], rise[lines, peak], rise[lines, peak + 1]
+    bend = low - 2 * mid + high
+    nudge = np.where(np.abs(bend) > 1e-6, 0.5 * (low - high) / np.where(bend == 0, 1, bend), 0.0)
+    step = distances[1] - distances[0]
+    found = distances[0] + (peak + 0.5 + np.clip(nudge, -1, 1)) * step
+    edges = (centre + found[:, None] * np.column_stack([np.cos(angles), np.sin(angles)]))[mid >= MIN_EDGE_CONTRAST]
+    if len(edges) < MIN_EDGE_POINTS:
+        return None
+    middle, size = _fit_circle(edges)
+    misses = np.abs(np.linalg.norm(edges - middle, axis=1) - size)
+    kept = edges[misses <= max(2.5 * float(np.median(misses)), radius * 0.05)]
+    if len(kept) < MIN_EDGE_POINTS:
+        return None
+    middle, size = _fit_circle(kept)
+    if not radius * 0.6 <= size <= radius * 1.4 or np.linalg.norm(middle - centre) > radius * 0.6:
+        return None
+    return [float(middle[0]), float(middle[1])]
+
+
+def eye_features(points, eye, head, gray=None):
     ids = EYES[eye]
     outer, inner = points[ids["outer"]], points[ids["inner"]]
     centre = (outer + inner) / 2
@@ -90,12 +189,22 @@ def eye_features(points, eye, head):
     iris = points[ids["iris"]: ids["iris"] + 5].mean(axis=0)
     top, bottom = points[ids["top"]], points[ids["bottom"]]
     offset = iris - centre
+    in_eye = lambda point: [
+        float((np.asarray(point) - centre) @ unit) / width,
+        float((np.asarray(point) - centre) @ normal) / width,
+    ]
+    landmark = in_eye(iris)
     return [
-        float(offset @ unit) / width,
-        float(offset @ normal) / width,
+        landmark[0],
+        landmark[1],
         float(np.linalg.norm(top - bottom)) / width,
         float((iris - (top + bottom) / 2) @ normal) / width,
         *head,
+        # If a pixel measurement isn't clear, fall back to the landmark reading.
+        *in_eye(iris_dark_centre(gray, points, eye) or iris),
+        *in_eye(iris_edge_centre(gray, points, eye) or iris),
+        in_eye(top)[1],
+        in_eye(bottom)[1],
     ]
 
 
@@ -119,15 +228,15 @@ def _head_pose(points, frame_w, frame_h):
     ]
 
 
-def extract(normalized, frame_w, frame_h, matrix=None):
+def extract(normalized, frame_w, frame_h, matrix=None, gray=None):
     """Convert normalized landmarks to features for both eyes plus framing info."""
     points = np.asarray(normalized, dtype=float)[:, :2] * [frame_w, frame_h]
     pose = head_pose(matrix)
     head = _head_pose(points, frame_w, frame_h) + pose
     return {
         "pose": pose,
-        "left": eye_features(points, "left", head),
-        "right": eye_features(points, "right", head),
+        "left": eye_features(points, "left", head, gray),
+        "right": eye_features(points, "right", head, gray),
         "face_width": head[SCALE - HEAD_X],
         "nose_offset": head[0],
     }
@@ -150,26 +259,37 @@ def framing_quality(face_width, nose_offset, brightness):
 
 
 def signal(features, eye):
-    """The part of one eye's features used for gaze: [iris_x, iris_y, openness].
+    """The part of one eye's features used for gaze (see EYE_SIGNAL_SIZE).
+
+    The upper lid follows up-down looks much more clearly than the iris does, and small head
+    tilts move both, so the fit needs to see the lid and the head's pose.
 
     Each eye measures along its own outer-to-inner axis, so the eyes are mirrored.
     Flipping the left eye makes looking the same way read the same in both eyes.
     """
     sign = -1.0 if eye == "left" else 1.0
-    return [sign * features[0], sign * features[1], features[OPENNESS]]
+    return [
+        sign * features[0],
+        sign * features[1],
+        features[OPENNESS],
+        sign * features[UPPER_LID],
+        features[POSE_START + POSE_YAW],
+        features[POSE_START + POSE_PITCH],
+        features[POSE_START + POSE_X],
+        features[POSE_START + POSE_Y],
+    ]
 
 
 def both_signal(left, right):
     """Averages the two eyes, which is steadier than either one alone."""
     a, b = signal(left, "left"), signal(right, "right")
-    return [(a[i] + b[i]) / 2 for i in range(3)]
+    return [(x + y) / 2 for x, y in zip(a, b)]
 
 
 def _fit_curve(points, targets):
     """A straight-line fit plus a smooth curve that absorbs what the line misses."""
     mean = points.mean(axis=0)
-    std = points.std(axis=0)
-    std[std < 1e-6] = 1.0
+    std = np.maximum(points.std(axis=0), SIGNAL_FLOORS)
     z = (points - mean) / std
     line_terms = np.column_stack([np.ones(len(z)), z])
     line = np.linalg.solve(
@@ -205,13 +325,13 @@ def predict(model, eye_signal):
 
 
 def head_moved(head_model, pose):
-    """True when the head has moved further than the tracker can account for."""
+    """True when the head has moved further than calibration taught the tracker about."""
     if not head_model or not pose or pose[POSE_DISTANCE] <= 0:
         return False
     reference = head_model["reference"]
     if reference[POSE_DISTANCE] <= 0:
         return False
-    yaw_limit, pitch_limit, distance_limit = MOVED_LIMITS[bool(head_model["used"])]
+    yaw_limit, pitch_limit, distance_limit = MOVED_LIMITS
     return (
         abs(pose[POSE_YAW] - reference[POSE_YAW]) > yaw_limit
         or abs(pose[POSE_PITCH] - reference[POSE_PITCH]) > pitch_limit
@@ -219,118 +339,12 @@ def head_moved(head_model, pose):
     )
 
 
-def _pose_shift(pose, reference):
-    """How far (cm) the head's aim on the screen plane moved: [toward screen left, down]."""
-    aim = lambda state, angle: state[POSE_DISTANCE] * np.tan(np.radians(state[angle]))
-    return (
-        aim(pose, POSE_YAW) - aim(reference, POSE_YAW) + pose[POSE_X] - reference[POSE_X],
-        aim(pose, POSE_PITCH) - aim(reference, POSE_PITCH) - (pose[POSE_Y] - reference[POSE_Y]),
-    )
-
-
-def _head_adjusted(point, pose, reference, gains):
-    left, down = _pose_shift(pose, reference)
-    # Same eye angles from further away land further from the camera, at top center.
-    stretch = pose[POSE_DISTANCE] / reference[POSE_DISTANCE] - 1
-    return [
-        float(point[0] - gains[0] * left + (point[0] - 0.5) * stretch),
-        float(point[1] + gains[1] * down + point[1] * stretch),
-    ]
-
-
-def adjust_for_head(head_model, pose, point):
-    """Apply the head correction, if it proved itself during calibration."""
-    if not head_model or not head_model["used"] or not pose or pose[POSE_DISTANCE] <= 0:
-        return point
-    moved = _head_adjusted(point, pose, head_model["reference"], head_model["gains"])
-    return [float(np.clip(moved[0], -0.1, 1.1)), float(np.clip(moved[1], -0.1, 1.1))]
-
-
-def _fit_gains(dots, reference):
-    """Fit how far one centimeter of head aim moves gaze on screen, for each axis."""
-    top_x = bottom_x = top_y = bottom_y = 0.0
-    for dot in dots:
-        left, down = _pose_shift(dot["pose"], reference)
-        stretch = dot["pose"][POSE_DISTANCE] / reference[POSE_DISTANCE] - 1
-        need_x = dot["target"][0] - dot["guess"][0] - (dot["guess"][0] - 0.5) * stretch
-        need_y = dot["target"][1] - dot["guess"][1] - dot["guess"][1] * stretch
-        top_x += -left * need_x
-        bottom_x += left * left
-        top_y += down * need_y
-        bottom_y += down * down
-    return [
-        float(np.clip(top_x / max(bottom_x, 1e-6), *HEAD_GAIN_LIMITS)),
-        float(np.clip(top_y / max(bottom_y, 1e-6), *HEAD_GAIN_LIMITS)),
-    ]
-
-
-def _head_dots(samples, model, eye):
-    """One steady reading per dot per head direction."""
-    groups = {}
-    for sample in samples:
-        left, right = sample.get("left"), sample.get("right")
-        chosen = None
-        if eye == "both" and is_open(left) and is_open(right):
-            chosen = (both_signal(left, right), left)
-        elif eye != "both" and is_open(sample.get(eye)):
-            chosen = (signal(sample[eye], eye), sample[eye])
-        if chosen:
-            key = (tuple(sample["target"]), sample["phase"])
-            groups.setdefault(key, []).append([*chosen[0], *chosen[1][POSE_START:]])
-    dots = []
-    for (target, phase), values in groups.items():
-        if len(values) >= MIN_HEAD_LOOKS:
-            middle = np.median(np.asarray(values, dtype=float), axis=0)
-            dots.append({
-                "target": target,
-                "phase": phase,
-                "guess": predict(model, middle[:3]),
-                "pose": middle[3:].tolist(),
-            })
-    return dots
-
-
-def _dot_miss(dot, point, aspect):
-    return float(np.hypot((point[0] - dot["target"][0]) * aspect, point[1] - dot["target"][1]))
-
-
-def fit_head(still_samples, head_samples, models, aspect):
-    """Learn the head correction, and only use it if it helps on unseen head positions.
-
-    Each head direction is scored with a correction fitted to the other directions.
-    """
-    poses = [
-        s[eye][POSE_START:] for s in still_samples for eye in ("left", "right") if is_open(s.get(eye))
-    ]
-    if not poses:
-        return None
-    reference = np.median(np.asarray(poses, dtype=float), axis=0).tolist()
-    result = {"reference": reference, "gains": [0.0, 0.0], "used": False, "before": None, "after": None}
-    usable = reference[POSE_DISTANCE] > 0 and models
-    eye = ("both" if "both" in models else min(models, key=lambda name: models[name]["error"])) if usable else None
-    dots = _head_dots(head_samples, models[eye], eye) if eye else []
-    if len(dots) < MIN_HEAD_DOTS:
-        return result
-
-    before, after = [], []
-    for dot in dots:
-        others = [other for other in dots if other["phase"] != dot["phase"]]
-        before.append(_dot_miss(dot, dot["guess"], aspect))
-        if others:
-            gains = _fit_gains(others, reference)
-            after.append(_dot_miss(dot, _head_adjusted(dot["guess"], dot["pose"], reference, gains), aspect))
-    result["before"] = float(np.median(before))
-    result["after"] = float(np.median(after)) if after else result["before"]
-    result["gains"] = _fit_gains(dots, reference)
-    result["used"] = result["after"] < result["before"] * HEAD_MUST_IMPROVE
-    return result
-
-
 def _settled_dots(groups):
     """One steady reading per dot, leaving out dots where the eye or head was moving."""
     wobble = {}
     for target, values in groups.items():
-        offsets = values - np.median(values, axis=0)
+        eye_part = values[:, :EYE_SIGNAL_SIZE]
+        offsets = eye_part - np.median(eye_part, axis=0)
         wobble[target] = float(np.percentile(np.linalg.norm(offsets, axis=1), 85))
     limit = max(float(np.median(list(wobble.values()))) * SHAKY_RATIO, SHAKY_FLOOR)
     return {t: np.median(v, axis=0) for t, v in groups.items() if wobble[t] <= limit}
@@ -345,7 +359,8 @@ def fit_eye(pairs, aspect):
     groups = {}
     for eye_signal, target in pairs:
         groups.setdefault(tuple(target), []).append(eye_signal)
-    settled = _settled_dots({t: np.asarray(v, dtype=float) for t, v in groups.items()})
+    enough = {t: np.asarray(v, dtype=float) for t, v in groups.items() if len(v) >= MIN_DOT_LOOKS}
+    settled = _settled_dots(enough) if enough else {}
     if len(settled) < MIN_TARGETS:
         return None, None
 
@@ -371,11 +386,13 @@ def is_blinking(model, eye_signal):
 
 
 def fit_calibration(samples, aspect):
-    """Fit each eye and both together. Samples look like {"target", "left", "right"}."""
-    still = [sample for sample in samples if not sample.get("phase")]
-    turned = [sample for sample in samples if sample.get("phase")]
+    """Fit each eye and both together. Samples look like {"target", "left", "right"}.
+
+    Dots seen with the head turned ("phase") train the same fit, which is how it learns
+    what head movement does to the eye readings.
+    """
     pairs = {"left": [], "right": [], "both": []}
-    for sample in still:
+    for sample in samples:
         left, right = sample.get("left"), sample.get("right")
         left_open, right_open = is_open(left), is_open(right)
         if left_open:
@@ -397,7 +414,14 @@ def fit_calibration(samples, aspect):
     # Webcams are imprecise, so the on-screen hit zone grows with the measured error.
     result["radius"] = float(np.clip(worst * 1.15, 0.10, 0.24))
     result["error"] = worst
-    result["head_model"] = fit_head(still, turned, result["models"], aspect)
+    poses = [
+        sample[eye][POSE_START:POSE_END]
+        for sample in samples
+        if not sample.get("phase")
+        for eye in ("left", "right")
+        if is_open(sample.get(eye))
+    ]
+    result["head_model"] = {"reference": np.median(np.asarray(poses, dtype=float), axis=0).tolist()} if poses else None
     return result
 
 

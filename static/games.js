@@ -1,4 +1,4 @@
-// The four eye games. Each returns a promise for { score, metrics }.
+// The five eye games. Each returns a promise for { score, metrics }.
 const COLORS = { sun: "#ffb627", coral: "#ff6b5e", brand: "#8577ff", ink: "#f3f1ff", dim: "#4a476e", good: "#4ccf9c" };
 
 class Stage {
@@ -371,4 +371,143 @@ const GAMES = {
       metrics: { correct, trials, smallest, contrast },
     };
   },
+};
+// EyeQuest Arcade — Jellyfish Rescue
+GAMES.jellyfish = async function(stage) {
+  const ctx = stage.context;
+  const tracker = stage.tracker;
+  const { seconds, dwell: dwellNeeded } = stage.params;
+
+  let elapsed = 0;
+  let rescued = 0;
+  let dwell = 0;
+  let level = 1;
+
+  const jelly = {
+    x: 0.5,
+    y: 0.5,
+    phase: 0,
+    size: 42
+  };
+
+  function newJelly() {
+    jelly.x = 0.2 + Math.random() * 0.6;
+    jelly.y = 0.2 + Math.random() * 0.6;
+    jelly.phase = Math.random() * Math.PI * 2;
+    dwell = 0;
+  }
+
+  stage.message("Look at the jellyfish to rescue it!");
+
+  await stage.run((dt) => {
+    elapsed += dt;
+
+    const w = innerWidth;
+    const h = innerHeight;
+    const t = elapsed;
+    const gaze = tracker.gaze(stage.eye);
+    const reach = Math.max(65, stage.hitRadius);
+
+    // Deep ocean background
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, "#07152e");
+    bg.addColorStop(1, "#123f60");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    // Floating ocean particles
+    for (let i = 0; i < 35; i++) {
+      const x = ((i * 137.5) % w);
+      const y = ((i * 83 + t * (8 + i % 5)) % h);
+      ctx.fillStyle = "rgba(130,230,255,0.25)";
+      ctx.beginPath();
+      ctx.arc(x, h - y, 2 + i % 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const x = jelly.x * w;
+    const y = jelly.y * h + Math.sin(t * 2 + jelly.phase) * 12;
+
+    // Rescue bubble
+    ctx.beginPath();
+    ctx.arc(x, y, reach, 0, Math.PI * 2);
+    ctx.strokeStyle = "#78e9ff";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Jellyfish tentacles
+    ctx.strokeStyle = "#ff9de8";
+    ctx.lineWidth = 5;
+
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x + i * 12, y + 8);
+      ctx.quadraticCurveTo(
+        x + i * 14 + Math.sin(t * 4 + i) * 12,
+        y + 45,
+        x + i * 12,
+        y + 58
+      );
+      ctx.stroke();
+    }
+
+    // Jellyfish body
+    ctx.fillStyle = "#ff9de8";
+    ctx.beginPath();
+    ctx.arc(x, y, 35, Math.PI, 0);
+    ctx.lineTo(x + 35, y + 8);
+    ctx.lineTo(x - 35, y + 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // Cute eyes
+    ctx.fillStyle = "#14213d";
+    ctx.beginPath();
+    ctx.arc(x - 12, y - 8, 4, 0, Math.PI * 2);
+    ctx.arc(x + 12, y - 8, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Gaze detection
+    if (gaze && stage.distance(gaze, [x / w, y / h]) < reach) {
+      dwell += dt;
+    } else {
+      dwell = Math.max(0, dwell - dt * 0.5);
+    }
+
+    // Rescue progress ring
+    ctx.beginPath();
+    ctx.arc(x, y, reach + 8, -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * Math.min(1, dwell / dwellNeeded));
+    ctx.strokeStyle = "#ffe477";
+    ctx.lineWidth = 7;
+    ctx.stroke();
+
+    if (dwell >= dwellNeeded) {
+      rescued++;
+      level = Math.floor(rescued / 5) + 1;
+      stage.burst(x, y);
+      chime();
+      newJelly();
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 24px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("🪼 Rescued: " + rescued, 30, 90);
+    ctx.fillText("Level " + level, 30, 125);
+    ctx.fillText(
+      "Time: " + Math.ceil(seconds - elapsed) + "s",
+      30, 160
+    );
+
+    stage.drawGaze(gaze);
+
+    return elapsed < seconds;
+  });
+
+  const par = seconds / (1.5 + dwellNeeded);
+  return {
+    score: Math.min(100, (100 * rescued) / par),
+    metrics: { rescued, level }
+  };
 };

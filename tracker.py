@@ -2,6 +2,7 @@
 
 Frames are analysed in memory and never written to disk.
 """
+import os
 import threading
 import time
 import urllib.request
@@ -20,6 +21,7 @@ MODEL_URL = (
 
 
 BOTH_EYES_PREFERENCE = 0.8
+cv2.setNumThreads(1)  # one frame at a time needs no helper threads competing for the processor
 
 
 class MediaPipeDetector:
@@ -98,7 +100,9 @@ class Tracker:
             return {"face": False, "quality": "no_face", "left": None, "right": None}
 
         landmarks, matrix = detected
-        found = gaze.extract(landmarks, width, height, matrix)
+        # TEMPORARY: the pixel measurements aren't used for gaze, so they only run while recording.
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if os.environ.get("EYEQUEST_RECORD") else None
+        found = gaze.extract(landmarks, width, height, matrix, gray)
         pose = found["pose"]
         state = {
             "face": True,
@@ -120,7 +124,7 @@ class Tracker:
                     for name, index in gaze.EYES[eye].items()
                 },
             }
-        finish = lambda point: gaze.tuned(tuning, gaze.adjust_for_head(head_model, pose, point))
+        finish = lambda point: gaze.tuned(tuning, point)
         combined = _combined_gaze(models, found, state)
         state["both"] = {"gaze": finish(combined) if combined else None}
         for eye in ("left", "right"):

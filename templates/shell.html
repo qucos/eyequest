@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EyeQuest</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    #app { display: block; width: 100%; height: 100%; border: 0; }
+    #return { position: fixed; right: 16px; bottom: 16px; z-index: 5; padding: 8px 14px; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <!-- The app lives in this frame, so full screen stays on as pages change. -->
+  <iframe id="app" src="{{ page }}" allow="camera; fullscreen" title="EyeQuest"></iframe>
+  <button class="btn ghost" id="return" hidden>Full screen</button>
+  <script>
+    const frame = document.getElementById("app");
+    const backButton = document.getElementById("return");
+    // Browsers only allow full screen after a click or key press, so the first one turns it on.
+    // Leaving with Esc turns this off, so nobody gets pulled back in against their wishes.
+    let autoEnter = true;
+
+    function enter() {
+      const request = document.documentElement.requestFullscreen;
+      if (request && !document.fullscreenElement) {
+        // A blocked request just leaves the app in the window, where it still works.
+        request.call(document.documentElement).catch(() => {});
+      }
+    }
+
+    function enterOnFirstUse(event) {
+      if (autoEnter && event.key !== "Escape") enter();
+    }
+
+    // Keeps the address bar and tab title on the page being shown, so refreshing stays there.
+    frame.addEventListener("load", () => {
+      const inside = frame.contentWindow;
+      history.replaceState(null, "", inside.location.pathname + inside.location.search);
+      document.title = frame.contentDocument.title;
+      inside.addEventListener("click", enterOnFirstUse, true);
+      inside.addEventListener("keydown", enterOnFirstUse, true);
+      frame.focus();
+    });
+
+    document.addEventListener("fullscreenchange", () => {
+      const isFull = Boolean(document.fullscreenElement);
+      if (!isFull) autoEnter = false;
+      backButton.hidden = isFull;
+      frame.focus();
+    });
+    backButton.addEventListener("click", enter);
+  </script>
+</body>
+</html>

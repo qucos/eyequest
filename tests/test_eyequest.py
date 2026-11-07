@@ -1,7 +1,9 @@
 import io
+import socket
 import sys
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -13,6 +15,7 @@ import app as eyequest
 import curriculum
 import gaze
 import progress
+import start
 
 
 # ---------- streak rules ----------
@@ -191,44 +194,42 @@ def still_samples():
     return samples
 
 
-def test_head_correction_recovers_the_screen_size_and_fixes_turned_heads():
-    fitted = gaze.fit_calibration(still_samples() + turned_samples(), 1.6)
-    head = fitted["head_model"]
-    assert head["used"]
-    assert head["after"] < head["before"] * 0.5
-    assert head["gains"][0] == pytest.approx(1 / SCREEN_WIDTH_CM, rel=0.25)
-    assert head["gains"][1] == pytest.approx(1 / SCREEN_HEIGHT_CM, rel=0.25)
+def turned_miss(model):
+    """Median miss on head-turned dots, with each eye signal built as the tracker builds it."""
+    misses = []
+    for sample in turned_samples(np.random.default_rng(4)):
+        guess = gaze.predict(model, gaze.both_signal(sample["left"], sample["right"]))
+        misses.append(np.hypot(guess[0] - sample["target"][0], guess[1] - sample["target"][1]))
+    return float(np.median(misses))
 
 
-def test_head_correction_moves_gaze_the_right_way():
-    head = {"reference": gaze.head_pose(fake_matrix()), "gains": [1 / 30, 1 / 19], "used": True}
-    turned_left = gaze.adjust_for_head(head, gaze.head_pose(fake_matrix(yaw=10)), [0.5, 0.5])
-    turned_down = gaze.adjust_for_head(head, gaze.head_pose(fake_matrix(pitch=8)), [0.5, 0.5])
-    assert turned_left[0] < 0.5
-    assert turned_down[1] > 0.5
-    assert gaze.adjust_for_head({**head, "used": False}, gaze.head_pose(fake_matrix(yaw=10)), [0.5, 0.5]) == [0.5, 0.5]
+def test_fit_learns_what_head_turns_do_to_gaze():
+    still_only = gaze.fit_calibration(still_samples(), 1.6)["models"]["both"]
+    with_turns = gaze.fit_calibration(still_samples() + turned_samples(), 1.6)["models"]["both"]
+    assert turned_miss(with_turns) < turned_miss(still_only) * 0.5
 
 
-def test_head_correction_turns_itself_off_when_it_does_not_help():
-    # Here the head turns but gaze lands where the eyes alone say, so correcting would hurt.
-    samples = turned_samples()
-    for sample in samples:
-        pose = sample["left"][gaze.POSE_START:]
-        yaw, pitch = pose[gaze.POSE_YAW], pose[gaze.POSE_PITCH]
-        sample["target"] = [
-            sample["target"][0] + 60 * np.tan(np.radians(yaw)) / SCREEN_WIDTH_CM,
-            sample["target"][1] - 60 * np.tan(np.radians(pitch)) / SCREEN_HEIGHT_CM,
-        ]
-    assert not gaze.fit_calibration(still_samples() + samples, 1.6)["head_model"]["used"]
+def test_small_head_wobbles_do_not_shift_gaze_without_head_training():
+    model = gaze.fit_calibration(still_samples(), 1.6)["models"]["both"]
+    found = gaze.extract(fake_landmarks(0.02, 0.01), 640, 480, fake_matrix())
+    wobbled = gaze.extract(fake_landmarks(0.02, 0.01), 640, 480, fake_matrix(yaw=0.5, pitch=0.5))
+    steady = gaze.predict(model, gaze.both_signal(found["left"], found["right"]))
+    moved = gaze.predict(model, gaze.both_signal(wobbled["left"], wobbled["right"]))
+    assert np.hypot(steady[0] - moved[0], steady[1] - moved[1]) < 0.05
 
 
-def test_head_moved_warns_sooner_without_head_correction():
-    reference = gaze.head_pose(fake_matrix())
-    small_turn = gaze.head_pose(fake_matrix(yaw=12))
-    big_turn = gaze.head_pose(fake_matrix(yaw=30))
-    assert gaze.head_moved({"reference": reference, "used": False}, small_turn)
-    assert not gaze.head_moved({"reference": reference, "used": True}, small_turn)
-    assert gaze.head_moved({"reference": reference, "used": True}, big_turn)
+def test_gaze_signal_uses_the_lid_and_head_pose():
+    found = gaze.extract(fake_landmarks(0.02, 0.01), 640, 480, fake_matrix(yaw=5, pitch=-3))
+    left = gaze.signal(found["left"], "left")
+    assert len(left) == len(gaze.SIGNAL_FLOORS)
+    assert left[3] == -found["left"][gaze.UPPER_LID]
+    assert left[4] == pytest.approx(found["pose"][gaze.POSE_YAW])
+
+
+def test_head_moved_warns_past_what_calibration_covered():
+    head = {"reference": gaze.head_pose(fake_matrix())}
+    assert not gaze.head_moved(head, gaze.head_pose(fake_matrix(yaw=10)))
+    assert gaze.head_moved(head, gaze.head_pose(fake_matrix(yaw=30)))
 
 
 def test_correction_removes_a_steady_shift():
@@ -268,6 +269,133 @@ def test_correction_is_skipped_when_it_cannot_help():
 
 def test_calibration_needs_enough_targets():
     assert gaze.fit_calibration(calibration_samples()[:30], 1.6) is None
+
+
+# ---------- starting the app ----------
+
+def test_install_counts_as_done_only_after_it_finishes(tmp_path):
+    venv, requirements = tmp_path / ".venv", tmp_path / "requirements.txt"
+    venv.mkdir()
+    requirements.write_text("flask\n")
+    assert start.needs_install(venv, requirements)
+    (venv / ".installed").write_text(start.requirements_id(requirements))
+    assert not start.needs_install(venv, requirements)
+    requirements.write_text("flask\nnumpy\n")
+    assert start.needs_install(venv, requirements)
+
+
+def test_a_failed_install_stays_unfinished_and_says_what_to_do(tmp_path, monkeypatch):
+    venv, requirements = tmp_path / ".venv", tmp_path / "requirements.txt"
+    requirements.write_text("flask\n")
+    monkeypatch.setattr(start, "_runs", lambda _command: True)
+    monkeypatch.setattr(start.subprocess, "run", lambda *_a, **_k: SimpleNamespace(returncode=1))
+    with pytest.raises(start.SetupError, match="run this command again"):
+        start.install(venv, requirements)
+    assert start.needs_install(venv, requirements)
+
+
+def test_a_busy_port_is_skipped():
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        assert not start.is_free(port)
+        assert start.free_port(port, 50) != port
+        with pytest.raises(start.SetupError, match="in use"):
+            start.free_port(port, 1)
+
+
+def test_waiting_for_the_app_stops_if_it_crashes():
+    crashed = SimpleNamespace(poll=lambda: 1)
+    assert start.wait_until_ready("http://localhost:9", crashed, seconds=30) is False
+
+
+# ---------- full screen ----------
+
+def test_opening_a_page_directly_loads_it_in_the_full_screen_frame(world):
+    client, _, _ = world
+    page = client.get("/settings?tab=1", headers={"Sec-Fetch-Dest": "document"}).get_data(as_text=True)
+    assert '<iframe id="app" src="/settings?tab=1"' in page
+    assert 'allow="camera; fullscreen"' in page
+
+
+def test_pages_inside_the_frame_load_normally(world):
+    client, _, _ = world
+    page = client.get("/login", headers={"Sec-Fetch-Dest": "iframe"}).get_data(as_text=True)
+    assert '<iframe id="app"' not in page
+    assert 'name="password"' in page
+
+
+def test_frame_cannot_be_pointed_at_another_website(world):
+    client, _, _ = world
+    for path in ("//evil.example/page", "/\\evil.example/page"):
+        page = client.get(path, headers={"Sec-Fetch-Dest": "document"}).get_data(as_text=True)
+        assert 'src="//' not in page and 'src="/\\' not in page
+
+
+# ---------- measuring the iris from pixels ----------
+
+def drawn_eye(eye, centre, radius=16.0, size=(240, 320)):
+    """A bright eye opening with a dark iris, drawn with sub-pixel accuracy, plus landmarks."""
+    scale = 8
+    big = np.full((size[0] * scale, size[1] * scale), 60, dtype=np.uint8)
+    middle = (160 * scale, 120 * scale)
+    cv2.ellipse(big, middle, (40 * scale, 22 * scale), 0, 0, 360, 225, -1)
+    iris_at = (round((centre[0] - 0.5) * scale), round((centre[1] - 0.5) * scale))
+    cv2.circle(big, iris_at, round(radius * scale), 40, -1)
+    gray = cv2.resize(big, (size[1], size[0]), interpolation=cv2.INTER_AREA)
+
+    points = np.zeros((478, 2))
+    # The outline runs from the outer corner, over the top, to the inner corner and back.
+    around = np.pi + np.linspace(0, 2 * np.pi, 16, endpoint=False)
+    for index, angle in zip(gaze.EYE_OUTLINES[eye], around):
+        points[index] = [160 + 40 * np.cos(angle), 120 + 22 * np.sin(angle)]
+    ids = gaze.EYES[eye]
+    points[ids["outer"]], points[ids["inner"]] = [120, 120], [200, 120]
+    points[ids["top"]], points[ids["bottom"]] = [160, 98], [160, 142]
+    # The landmark is deliberately a little off, as a real one is.
+    guess = np.array([160.0, 120.0])
+    points[ids["iris"]] = guess
+    points[ids["iris"] + 1: ids["iris"] + 5] = guess + radius * np.array([[1, 0], [0, 1], [-1, 0], [0, -1]])
+    return gray, points
+
+
+@pytest.mark.parametrize("measure", [gaze.iris_dark_centre, gaze.iris_edge_centre])
+def test_pixel_measurements_see_moves_smaller_than_a_pixel(measure):
+    readings = []
+    for shift in (0.0, 0.5, 1.0, 1.5):
+        gray, points = drawn_eye("right", (160 + shift, 120 + shift))
+        readings.append(measure(gray, points, "right"))
+    readings = np.asarray(readings, dtype=float)
+    steps = np.diff(readings, axis=0)
+    assert np.allclose(steps, 0.5, atol=0.15)
+
+
+@pytest.mark.parametrize("measure", [gaze.iris_dark_centre, gaze.iris_edge_centre])
+def test_pixel_measurements_give_up_when_they_cannot_see(measure):
+    gray, points = drawn_eye("left", (160, 120))
+    assert measure(None, points, "left") is None
+    assert measure(np.full_like(gray, 128), points, "left") is None
+    small = points.copy()
+    ids = gaze.EYES["left"]
+    small[ids["iris"] + 1: ids["iris"] + 5] = small[ids["iris"]] + 1.0
+    assert measure(gray, small, "left") is None
+
+
+def test_features_fall_back_to_the_landmark_without_an_image():
+    _, points = drawn_eye("right", (160, 120))
+    features = gaze.eye_features(points, "right", [0.0] * 11)
+    assert len(features) == gaze.FEATURE_COUNT
+    assert features[gaze.DARK_X] == features[gaze.EDGE_X] == features[0]
+    assert features[gaze.DARK_Y] == features[gaze.EDGE_Y] == features[1]
+    assert features[gaze.UPPER_LID] * features[gaze.LOWER_LID] < 0
+
+
+def test_recording_is_off_unless_switched_on(world, monkeypatch):
+    client, _, _ = world
+    signup(client)
+    monkeypatch.delenv("EYEQUEST_RECORD", raising=False)
+    assert client.post("/api/calibrate/record", json={"samples": []}).status_code == 404
 
 
 # ---------- lesson path ----------
@@ -452,10 +580,24 @@ def test_solo_step_covers_the_stronger_eye(world):
     client, _, _ = world
     signup(client)
     client.post("/onboarding", data={"weak_eye": "left", "goal_xp": "20", "mouse_mode": "1"})
-    for lesson_id in curriculum.ORDER[:4]:
+    for lesson_id in curriculum.ORDER[:curriculum.ORDER.index("u2l1")]:
         finish(client, lesson_id)
     page = client.get("/lesson/u2l1").get_data(as_text=True)
     assert '"cover":"right"' in page.replace(" ", "")
+
+
+def test_jellyfish_lesson_opens_and_saves_its_score(world):
+    client, _, _ = world
+    signup(client)
+    client.post("/onboarding", data={"weak_eye": "left", "goal_xp": "20", "mouse_mode": "1"})
+    for lesson_id in curriculum.ORDER[:curriculum.ORDER.index("u1l5")]:
+        finish(client, lesson_id)
+    page = client.get("/lesson/u1l5").get_data(as_text=True)
+    assert "Jellyfish Rescue" in page
+    step = {"game": "jellyfish", "eye": "both", "score": 80, "metrics": {"rescued": 10, "level": 3}}
+    result = client.post("/api/lesson/complete", json={"lesson_id": "u1l5", "steps": [step]})
+    assert result.status_code == 200
+    assert result.get_json()["score"] == 80
 
 
 # ---------- tracer and fine-tuning ----------

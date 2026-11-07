@@ -24,6 +24,11 @@ GAMES = {
         "how": "Which way does the gap in the ring point? Press an arrow key. It gets smaller as you improve.",
         "gaze": False,
     },
+    "jellyfish": {
+        "name": "Jellyfish Rescue",
+        "how": "Keep looking at each jellyfish until the ring fills up. Only your eyes move.",
+        "gaze": True,
+    },
 }
 
 
@@ -47,6 +52,10 @@ def gap(eye, trials=16, contrast=1.0, start=70):
     return step("gap", eye, trials=trials, contrast=contrast, start=start)
 
 
+def jellyfish(eye, seconds=30, dwell=0.8):
+    return step("jellyfish", eye, seconds=seconds, dwell=dwell)
+
+
 UNITS = [
     {
         "id": "u1",
@@ -57,6 +66,7 @@ UNITS = [
             ("Star hopping", [stars("both", 25), firefly("both", 25, 0.5)]),
             ("Hold it steady", [steady("both", 20), stars("both", 25)]),
             ("Spot the gap", [gap("both", 12), firefly("both", 25, 0.55)]),
+            ("Jellyfish rescue", [jellyfish("both", 30), steady("both", 15)]),
         ],
     },
     {

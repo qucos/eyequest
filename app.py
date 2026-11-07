@@ -154,6 +154,11 @@ def create_app(data_dir=None, detector=None, today=date.today):
         # Blocks other websites from reaching this app through DNS tricks.
         if request.host.split(":")[0] not in ALLOWED_HOSTS:
             abort(403)
+        # Opening a page directly loads the full-screen frame, which loads that page inside it.
+        opened_directly = request.method == "GET" and request.headers.get("Sec-Fetch-Dest") == "document"
+        if opened_directly and request.endpoint != "static" and not request.path.startswith("/api/"):
+            # Stripping leading slashes keeps the frame from loading another website.
+            return render_template("shell.html", page="/" + request.full_path.lstrip("/\\").rstrip("?"))
         g.user = None
         if "uid" in session:
             g.user = conn().execute(
@@ -476,14 +481,24 @@ def create_app(data_dir=None, detector=None, today=date.today):
         )
         conn().commit()
         model_cache[g.user["id"]] = fitted
-        head = fitted["head_model"] or {}
         return jsonify(
             ok=True,
             error_size=fitted["error"],
             radius=fitted["radius"],
             eyes=sorted(fitted["models"]),
-            head={"used": head.get("used"), "before": head.get("before"), "after": head.get("after")},
         )
+
+    @app.post("/api/calibrate/record")
+    @login_required
+    def api_calibrate_record():
+        """TEMPORARY: saves calibration numbers (never images) for comparing tracking methods."""
+        if not os.environ.get("EYEQUEST_RECORD"):
+            return jsonify(ok=False), 404
+        folder = data_dir / "recordings"
+        folder.mkdir(exist_ok=True)
+        name = f"{secrets.token_hex(4)}.json"
+        (folder / name).write_text(json.dumps(request.get_json(silent=True) or {}))
+        return jsonify(ok=True)
 
     @app.post("/api/calibrate/check")
     @login_required
