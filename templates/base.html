@@ -1,0 +1,28 @@
+{% import "_icons.html" as icons %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}EyeQuest{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+{% block header %}
+  {% if g.user and g.user['onboarded'] %}
+  <header class="topbar">
+    <a class="logo" href="{{ url_for('learn') }}">{{ icons.mascot(32) }}<span>EyeQuest</span></a>
+    <nav class="nav">
+      <a href="{{ url_for('learn') }}" class="{{ 'on' if request.endpoint == 'learn' }}">Learn</a>
+      <a href="{{ url_for('progress_page') }}" class="{{ 'on' if request.endpoint == 'progress_page' }}">Progress</a>
+      <a href="{{ url_for('eyes') }}" class="{{ 'on' if request.endpoint == 'eyes' }}">Eye Tracker</a>
+      <a href="{{ url_for('settings') }}" class="{{ 'on' if request.endpoint == 'settings' }}">Settings</a>
+    </nav>
+    <span class="chip {{ 'zero' if not streak }}" style="{{ 'color: var(--coral)' if streak }}" title="Day streak">{{ icons.flame() }}{{ streak }}</span>
+    <span class="chip" title="Total XP">{{ g.user['xp'] }} XP</span>
+    <form class="logout" method="post" action="{{ url_for('logout') }}"><button class="btn link small">Log out</button></form>
+  </header>
+  {% endif %}
+{% endblock %}
+{% block content %}{% endblock %}
+</body>
+</html>

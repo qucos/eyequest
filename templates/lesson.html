@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ config.title }} · EyeQuest{% endblock %}
+{% block body_class %}stage-page{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<canvas id="stage"></canvas>
+<div class="lesson-top">
+  <a class="quit" href="{{ url_for('learn') }}" aria-label="Quit lesson">✕</a>
+  <div class="bar" role="progressbar" aria-label="Lesson progress"><i id="bar"></i></div>
+</div>
+<div class="overlay" id="intro">
+  <div class="panel">
+    <span id="intro-open">{{ icons.mascot(84) }}</span>
+    <span id="intro-patch" hidden>{{ icons.mascot(84, patch=True) }}</span>
+    <h1 id="intro-title"></h1>
+    <p id="intro-cover" style="font-weight:800;color:var(--sun)"></p>
+    <p class="muted" id="intro-how"></p>
+    <p class="camera-status" id="intro-status" role="status"></p>
+    <button class="btn" id="intro-go">Start</button>
+  </div>
+</div>
+<div class="overlay" id="finish" hidden>
+  <div class="panel">
+    <span>{{ icons.mascot(84) }}</span>
+    <h1 id="finish-title">Lesson complete!</h1>
+    <div class="result-stars" id="finish-stars">{{ icons.star() }}{{ icons.star() }}{{ icons.star() }}</div>
+    <div class="tally">
+      <div><b id="t-xp"></b><span>XP earned</span></div>
+      <div><b id="t-streak"></b><span>Day streak</span></div>
+      <div><b id="t-score"></b><span>Accuracy</span></div>
+    </div>
+    <p id="finish-note"></p>
+    <p class="muted small">Give your eyes a break: look at something far away for 20 seconds.</p>
+    <a class="btn" href="{{ url_for('learn') }}">Continue</a>
+  </div>
+</div>
+<p class="hint" id="hint" hidden></p>
+<div class="lost" id="lost" hidden>I can't see your eyes. Look back at the screen.</div>
+<div class="gap-keys" id="gap-keys" hidden>
+  <button data-dir="up" aria-label="Gap up">↑</button>
+  <button data-dir="left" aria-label="Gap left">←</button>
+  <button data-dir="down" aria-label="Gap down">↓</button>
+  <button data-dir="right" aria-label="Gap right">→</button>
+</div>
+<script>
+  window.LESSON = {{ config|tojson }};
+  window.TRACER = {{ tracer|tojson }};
+</script>
+<script src="{{ url_for('static', filename='tracker.js') }}"></script>
+<script src="{{ url_for('static', filename='tracer.js') }}"></script>
+<script src="{{ url_for('static', filename='games.js') }}"></script>
+<script src="{{ url_for('static', filename='lesson.js') }}"></script>
+{% endblock %}

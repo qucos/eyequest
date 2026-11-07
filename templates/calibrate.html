@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Calibrate · EyeQuest{% endblock %}
+{% block body_class %}stage-page{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<canvas id="stage"></canvas>
+<div class="overlay" id="setup">
+  <div class="panel">
+    {{ icons.mascot(76) }}
+    <h1>Let's find your eyes</h1>
+    <p class="muted">Sit about an arm's length away, facing a light, with the camera near eye level. It takes about a minute and a half. Your video stays on this computer and is never saved.</p>
+    <video class="preview" id="preview" muted playsinline hidden></video>
+    <p class="camera-status" id="status" role="status"></p>
+    <button class="btn" id="camera">Turn on camera</button>
+    <button class="btn" id="begin" hidden disabled>Start calibration</button>
+    <a class="btn link" href="{{ url_for('learn') }}">Not now</a>
+  </div>
+</div>
+<div class="overlay" id="done" hidden>
+  <div class="panel">
+    {{ icons.mascot(76) }}
+    <h1 id="done-title"></h1>
+    <p class="muted" id="done-text"></p>
+    <a class="btn" id="done-go" href="{{ url_for('lesson', lesson_id=lesson_id) if lesson_id else url_for('learn') }}">Continue</a>
+    <button class="btn link" id="again">Calibrate again</button>
+  </div>
+</div>
+<p class="hint" id="hint" hidden></p>
+<script>window.TRACER = {{ tracer|tojson }};</script>
+<script src="{{ url_for('static', filename='tracker.js') }}"></script>
+<script src="{{ url_for('static', filename='tracer.js') }}"></script>
+<script src="{{ url_for('static', filename='calibrate.js') }}"></script>
+{% endblock %}

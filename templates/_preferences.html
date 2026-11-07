@@ -1,0 +1,23 @@
+{% set weak = g.user['weak_eye'] %}
+<fieldset>
+  <legend>Which eye is your lazy eye?</legend>
+  <div class="choices row">
+    <label class="choice"><input type="radio" name="weak_eye" value="left" {{ 'checked' if weak == 'left' }}><span>Left eye</span></label>
+    <label class="choice"><input type="radio" name="weak_eye" value="right" {{ 'checked' if weak == 'right' }}><span>Right eye</span></label>
+    <label class="choice"><input type="radio" name="weak_eye" value="unknown" {{ 'checked' if weak == 'unknown' }}><span>Not sure</span></label>
+  </div>
+  <p class="muted small" style="margin-top:8px">Go with your eye doctor's answer. If you're not sure, your eyes take turns by day until you find out.</p>
+</fieldset>
+<fieldset>
+  <legend>Daily goal</legend>
+  <div class="choices row">
+    {% for xp, name in goals.items() %}
+    <label class="choice"><input type="radio" name="goal_xp" value="{{ xp }}" {{ 'checked' if g.user['goal_xp'] == xp }}><span>{{ name }}<small>{{ xp }} XP a day</small></span></label>
+    {% endfor %}
+  </div>
+</fieldset>
+<fieldset>
+  <label class="toggle"><input type="checkbox" name="mouse_mode" value="1" {{ 'checked' if g.user['mouse_mode'] }}>
+    <span>Practice with the mouse<small>For trying the games without a camera. Move the mouse where you're looking. This practice doesn't count on your progress charts.</small></span>
+  </label>
+</fieldset>

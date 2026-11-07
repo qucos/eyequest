@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<main>
+  <section class="hero">
+    {{ icons.mascot(130) }}
+    <h1>A few minutes a day for your lazy eye</h1>
+    <p class="muted">EyeQuest uses your webcam to follow your eyes through short games. Keep your streak going and watch your progress build.</p>
+    <div class="actions">
+      <a class="btn" href="{{ url_for('signup') }}">Get started</a>
+      <a class="btn ghost" href="{{ url_for('login') }}">I have an account</a>
+    </div>
+  </section>
+  <section class="pillars">
+    <div class="card"><h2>Short daily lessons</h2><p>Two to four minutes on a path that gets harder as you go.</p></div>
+    <div class="card"><h2>Real eye tracking</h2><p>Your webcam checks whether each eye is following the target.</p></div>
+    <div class="card"><h2>Private by design</h2><p>Video stays on this computer and is never saved.</p></div>
+  </section>
+  <p class="notice"><strong>EyeQuest supports your eye care, but doesn't replace it.</strong> It isn't a medical device and can't diagnose or treat amblyopia. See an eye doctor before relying on it, and keep following any patching or glasses plan you've been given. Stop if you get a headache, eye pain or double vision.</p>
+</main>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Eye Tracker · EyeQuest{% endblock %}
+{% block content %}
+<main class="page">
+  <h1>Eye Tracker</h1>
+  <p class="muted">Green rings mark your irises. {% if calibrated %}The tracer shows where you're looking. Change how it looks in <a href="{{ url_for('settings') }}">Settings</a>.{% else %}<a href="{{ url_for('calibrate') }}">Calibrate</a> to see the tracer showing where you're looking.{% endif %} Your video stays on this computer and is never saved.</p>
+  <button class="btn" id="camera" hidden>Turn on camera</button>
+  <p class="camera-status" id="status" role="status" style="margin-top:12px"></p>
+  <div class="tune-controls" id="tune-controls" hidden>
+    <button class="btn ghost" id="tune">Fine-tune</button>
+    <a class="btn ghost" href="{{ url_for('calibrate') }}">Recalibrate</a>
+    <button class="btn link" id="tune-reset">Clear fine-tuning</button>
+    <p class="small" id="tune-help" hidden><strong>Look right at any spot on the page, then click it.</strong> Try spots all over the screen, especially near the top. Each click teaches the tracker about that area.</p>
+    <p class="small" id="tune-result" role="status"></p>
+  </div>
+  <div class="eye-view" id="view" hidden>
+    <video id="video" muted playsinline></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div class="eye-readout" id="readout" hidden>
+    <div class="card stat"><b id="left-state">–</b><span>Left eye</span></div>
+    <div class="card stat"><b id="right-state">–</b><span>Right eye</span></div>
+    <div class="card stat"><b id="head-turn">–</b><span>Head turn</span></div>
+    <div class="card stat"><b id="head-tilt">–</b><span>Head up/down</span></div>
+    <div class="card stat"><b id="head-distance">–</b><span>Distance (approx.)</span></div>
+    <div class="card stat"><b id="fps">–</b><span>Frames per second</span></div>
+  </div>
+</main>
+<script>
+  window.TRACER = {{ tracer|tojson }};
+  window.EYE_PAGE = {{ {"calibrated": calibrated}|tojson }};
+</script>
+<script src="{{ url_for('static', filename='tracker.js') }}"></script>
+<script src="{{ url_for('static', filename='tracer.js') }}"></script>
+<script src="{{ url_for('static', filename='eyes.js') }}"></script>
+{% endblock %}

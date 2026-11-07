@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Learn · EyeQuest{% endblock %}
+{% block content %}
+<main class="page learn">
+  <div>
+    {% for message in get_flashed_messages() %}<div class="flash" role="status">{{ message }}</div>{% endfor %}
+    {% for unit in units %}
+    <section>
+      <div class="unit-banner"><h2>{{ unit.title }}</h2><p>{{ unit.blurb }}</p></div>
+      <div class="path">
+        {% for node in unit.nodes %}
+        {% set shift = [0, 62, 0, -62][loop.index0 % 4] %}
+        <div class="node-wrap" style="transform: translateX({{ shift }}px)">
+          {% if node.state == 'current' %}<span class="start-tag">START</span>{% endif %}
+          {% if node.state == 'locked' %}
+          <span class="node locked" aria-label="{{ node.title }}, locked">{{ icons.lock() }}</span>
+          {% else %}
+          <a class="node {{ node.state }}" href="{{ url_for('lesson', lesson_id=node.id) }}" aria-label="{{ node.title }}{{ ', ' ~ node.stars ~ ' stars' if node.stars }}">
+            {{ icons.check() if node.state == 'done' else icons.eye() }}
+          </a>
+          {% endif %}
+          <div class="node-title">{{ node.title }}</div>
+          <div class="node-stars">
+            {% if node.state == 'done' %}{% for n in range(3) %}{{ icons.star('' if n < node.stars else 'off') }}{% endfor %}{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+    {% if path_done %}
+    <section class="card" style="text-align:center">
+      <h2>You finished the path</h2>
+      <p class="muted">Keep your streak going with the daily mix.</p>
+      <a class="btn" href="{{ url_for('lesson', lesson_id='mix') }}">Start daily mix</a>
+    </section>
+    {% endif %}
+  </div>
+  <aside class="side">
+    <div class="card goal">
+      {% set pct = (today.xp / goal) if today.xp < goal else 1 %}
+      <div class="ring">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle cx="50" cy="50" r="42"/>
+          {% if today.xp %}<circle class="fill" cx="50" cy="50" r="42" pathLength="100" stroke-dasharray="{{ pct * 100 }} 100"/>{% endif %}
+        </svg>
+        <b>{{ today.xp }}/{{ goal }}</b>
+      </div>
+      <div>
+        <h2 style="margin:0">Daily goal</h2>
+        <p class="muted small" style="margin:0">{{ "Goal met today. Nice work!" if today.xp >= goal else "XP earned today" }}</p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="mascot-note">
+        {{ icons.mascot(60, patch=rest) }}
+        <div class="bubble">
+          {% if rest %}That's plenty for today. Rest your eyes, and I'll see you tomorrow!
+          {% elif today.lessons %}Good work today. Remember to look at something far away for 20 seconds.
+          {% elif streak %}You're on a {{ streak }}-day streak. Let's keep it going!
+          {% else %}Ready for today's lesson? Pick up where the path glows.{% endif %}
+        </div>
+      </div>
+      {% if not rest %}
+      <a class="btn wide" style="margin-top:14px" href="{{ url_for('lesson', lesson_id=current) }}">{{ 'Keep going' if today.lessons else "Start today's lesson" }}</a>
+      {% endif %}
+    </div>
+    {% if g.user['freezes'] %}
+    <div class="card small"><strong>Streak protection: {{ g.user['freezes'] }}</strong><br><span class="muted">Each one saves your streak if you miss a day. You earn one every 7 days, up to 2.</span></div>
+    {% endif %}
+  </aside>
+</main>
+{% endblock %}

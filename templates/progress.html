@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Progress · EyeQuest{% endblock %}
+{% block content %}
+<main class="page">
+  <h1>Your progress</h1>
+  <div class="stats">
+    <div class="card stat"><b>{{ streak }}</b><span>Day streak</span></div>
+    <div class="card stat"><b>{{ g.user['best_streak'] }}</b><span>Best streak</span></div>
+    <div class="card stat"><b>{{ g.user['xp'] }}</b><span>Total XP (level {{ level }})</span></div>
+    <div class="card stat"><b>{{ lesson_total }}</b><span>Lessons over {{ days_active }} day{{ '' if days_active == 1 else 's' }}</span></div>
+  </div>
+
+  <section class="card section">
+    <h2>Last 12 weeks</h2>
+    <div class="calendar" aria-label="Calendar of days you practiced">
+      {% for cell in calendar %}<i class="{{ 'on' if cell.active }} {{ 'future' if cell.future }}" title="{{ cell.day }}{{ ': practiced' if cell.active }}"></i>{% endfor %}
+    </div>
+  </section>
+
+  <section class="card section">
+    <h2>How closely each eye follows the firefly</h2>
+    <p class="muted small">Share of time each eye was on target, with both eyes open. Webcam tracking is rough, so look at the trend over weeks and not single days.</p>
+    <div id="follow-chart"></div>
+  </section>
+
+  <section class="card section">
+    <h2>Smallest ring you spotted with your solo eye</h2>
+    <p class="muted small">Ring size in screen pixels, so lower is better. Sit the same distance away each time. This isn't a vision test.</p>
+    <div id="gap-chart"></div>
+  </section>
+
+  <section class="card section">
+    <h2>Badges</h2>
+    <div class="badges">
+      {% for key, badge in badges.items() %}
+      <div class="badge {{ '' if key in have else 'off' }}">{{ icons.star() }}<b>{{ badge[0] }}</b><span>{{ badge[1] }}{{ ' (not yet)' if key not in have }}</span></div>
+      {% endfor %}
+    </div>
+  </section>
+</main>
+<script>window.CHARTS = {{ charts|tojson }};</script>
+<script src="{{ url_for('static', filename='charts.js') }}"></script>
+{% endblock %}

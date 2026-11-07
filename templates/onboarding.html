@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Set up · EyeQuest{% endblock %}
+{% block content %}
+<main class="narrow">
+  <div class="mascot-note" style="margin-bottom:20px">
+    {{ icons.mascot(72) }}
+    <div class="bubble">Hi {{ g.user['username'] }}, I'm Blink! Let's set up your daily practice.</div>
+  </div>
+  <form method="post">
+    {% include "_preferences.html" %}
+    <div class="card small" style="margin-bottom:20px">
+      <strong>Before you start.</strong> EyeQuest isn't a medical treatment. Please see an eye doctor if you haven't, and keep up any plan they gave you. Stop if you get a headache, eye pain or double vision. If double vision or a change in your vision comes on suddenly, get medical care right away.
+    </div>
+    <button class="btn wide">Start my path</button>
+  </form>
+</main>
+{% endblock %}

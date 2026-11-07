@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Settings · EyeQuest{% endblock %}
+{% block content %}
+<main class="narrow">
+  <h1>Settings</h1>
+  {% for message in get_flashed_messages() %}<div class="flash" role="status">{{ message }}</div>{% endfor %}
+  <form method="post" id="settings-form">
+    {% include "_preferences.html" %}
+
+    <h2 style="margin-top:28px">Tracer</h2>
+    <p class="muted small">The marker that shows where you're looking.</p>
+    <canvas class="tracer-preview" id="tracer-preview" aria-label="Preview of your tracer"></canvas>
+
+    <fieldset>
+      <legend>Shape</legend>
+      <div class="choices row">
+        {% for value, name in tracer_options.shapes.items() %}
+        <label class="choice"><input type="radio" name="tracer_shape" value="{{ value }}" {{ 'checked' if tracer.shape == value }}><span>{{ name }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Color</legend>
+      <div class="swatches">
+        {% for value, name in tracer_options.colors.items() %}
+        <label class="swatch" title="{{ name }}"><input type="radio" name="tracer_color" value="{{ value }}" aria-label="{{ name }}" {{ 'checked' if tracer.color == value }}><span style="background:{{ value }}"></span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <label class="field">Size
+      <input type="range" name="tracer_size" min="{{ tracer_options.size[0] }}" max="{{ tracer_options.size[1] }}" value="{{ tracer.size }}">
+    </label>
+    <label class="field">Opacity
+      <input type="range" name="tracer_opacity" min="{{ tracer_options.opacity[0] }}" max="{{ tracer_options.opacity[1] }}" value="{{ tracer.opacity }}">
+    </label>
+    <fieldset>
+      <legend>Trail</legend>
+      <div class="choices row">
+        {% for value, name in tracer_options.trails.items() %}
+        <label class="choice"><input type="radio" name="tracer_trail" value="{{ value }}" {{ 'checked' if tracer.trail == value }}><span>{{ name }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Movement</legend>
+      <div class="choices row">
+        {% for value, name in tracer_options.smoothing.items() %}
+        <label class="choice"><input type="radio" name="tracer_smoothing" value="{{ value }}" {{ 'checked' if tracer.smoothing == value }}><span>{{ name }}</span></label>
+        {% endfor %}
+      </div>
+      <p class="muted small" style="margin-top:8px">Steady is calmer but slower to follow your eyes. Quick follows faster but jitters more. This takes effect on your real tracker, not in the preview.</p>
+    </fieldset>
+    <fieldset>
+      <label class="toggle"><input type="checkbox" name="tracer_autostart" value="1" {{ 'checked' if tracer.autostart }}>
+        <span>Start the camera when I open Eye Tracker<small>The tracer appears as soon as you allow the camera. Turn this off to start it with a button.</small></span>
+      </label>
+    </fieldset>
+    <fieldset>
+      <label class="toggle"><input type="checkbox" name="tracer_in_games" value="1" {{ 'checked' if tracer.in_games }}>
+        <span>Show the tracer in games<small>Some people find it distracting while following a target.</small></span>
+      </label>
+    </fieldset>
+    <button class="btn wide">Save</button>
+  </form>
+  <p style="margin-top:22px"><a href="{{ url_for('calibrate') }}">Recalibrate eye tracking</a></p>
+</main>
+<script>window.TRACER = {{ tracer|tojson }};</script>
+<script src="{{ url_for('static', filename='tracer.js') }}"></script>
+<script src="{{ url_for('static', filename='settings.js') }}"></script>
+{% endblock %}
