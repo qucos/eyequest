@@ -733,3 +733,19 @@ def test_head_guide_handles_moving_closer_further_and_sideways():
     both = moved(gaze.POSE_X, 3.5)
     both[gaze.POSE_PITCH] += 12
     assert gaze.head_guide(head, both) == "raise_chin"
+
+
+# ---------- error pages and icon ----------
+
+def test_missing_pages_get_a_friendly_page_and_apis_get_json(world):
+    client, _, _ = world
+    page = client.get("/no-such-page")
+    assert page.status_code == 404 and "Page not found" in page.get_data(as_text=True)
+    api = client.post("/api/no-such-thing")
+    assert api.status_code == 404 and "error" in api.get_json()
+
+
+def test_pages_have_a_tab_icon(world):
+    client, _, _ = world
+    assert "favicon.svg" in client.get("/login").get_data(as_text=True)
+    assert client.get("/static/favicon.svg").status_code == 200

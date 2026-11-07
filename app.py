@@ -162,6 +162,19 @@ def create_app(data_dir=None, detector=None, today=date.today):
         conn().commit()
         model_cache[user["id"]] = saved
 
+    def friendly_error(status, heading, message):
+        if request.path.startswith("/api/"):
+            return jsonify(error=message), status
+        return render_template("error.html", heading=heading, message=message), status
+
+    @app.errorhandler(404)
+    def not_found(_error):
+        return friendly_error(404, "Page not found", "That page doesn't exist. It may have moved.")
+
+    @app.errorhandler(500)
+    def server_error(_error):
+        return friendly_error(500, "Something went wrong", "That didn't work. Try again, and restart EyeQuest if it keeps happening.")
+
     @app.teardown_appcontext
     def close_db(_error):
         connection = g.pop("db", None)

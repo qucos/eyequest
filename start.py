@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
 REQUIREMENTS = ROOT / "requirements.txt"
-MIN_PYTHON = (3, 10)
+MIN_PYTHON = (3, 11)  # the oldest version the automatic tests run on
 FIRST_PORT = 5050
 PORT_TRIES = 20
 READY_SECONDS = 60
