@@ -121,6 +121,13 @@ a { color: var(--brand); }
 .pillars { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; max-width: 800px; margin: 0 auto; padding: 0 16px 24px; }
 .pillars h2 { font-size: 1.05rem; }
 .pillars p { margin: 0; font-size: .95rem; color: var(--muted); }
+.research { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+.research h2 { margin-top: 32px; }
+.research .notice-box { background: var(--card); border: 2px solid var(--coral); border-radius: var(--radius); padding: 14px 18px; }
+.research .takeaways li, .research ol li, .research ul li { margin-bottom: 8px; }
+.research .study { margin-bottom: 14px; }
+.research .study h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.research .study p { margin: 0 0 6px; }
 .notice { max-width: 800px; margin: 0 auto 40px; padding: 0 16px; font-size: .9rem; color: var(--muted); }
 
 /* forms */

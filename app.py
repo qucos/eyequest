@@ -17,6 +17,7 @@ import curriculum
 import db
 import gaze
 import progress
+import research
 import tracer_settings
 from tracker import Tracker
 
@@ -246,6 +247,10 @@ def create_app(data_dir=None, detector=None, today=date.today):
         if g.user is None:
             return render_template("welcome.html")
         return redirect(url_for("learn" if g.user["onboarded"] else "onboarding"))
+
+    @app.route("/research")
+    def research_page():
+        return render_template("research.html", studies=research.STUDIES)
 
     @app.route("/signup", methods=["GET", "POST"])
     def signup():

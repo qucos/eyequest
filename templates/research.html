@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}The research · EyeQuest{% endblock %}
+{% block content %}
+<main class="research">
+  <h1>The research behind EyeQuest</h1>
+  <p class="notice-box"><strong>EyeQuest hasn't been tested in any study, and there's no evidence yet that it improves vision.</strong> This page summarizes published research that EyeQuest's design draws on, including results that don't support game-based treatment. It isn't medical advice. A lazy eye (amblyopia) should be treated with an eye doctor.</p>
+
+  <h2>The short version</h2>
+  <ol class="takeaways">
+    <li><strong>Patching works, but children get far less of it than prescribed.</strong> How much vision improves depends on how many hours the patch is actually worn.</li>
+    <li><strong>Games on their own have had mixed results.</strong> In the largest trial, an iPad game did slightly worse than patching, partly because few children played as much as prescribed.</li>
+    <li><strong>Some carefully designed digital treatments have done well in trials.</strong> They show each eye different images through special glasses or a headset, which EyeQuest doesn't do.</li>
+    <li><strong>Doing an activity while patched doesn't seem to speed up recovery on its own.</strong> The patch does the work. A game's value is getting the patch worn, and showing that it was.</li>
+  </ol>
+  <p>So EyeQuest's goal is narrow and testable: <strong>help children do the practice their eye doctor prescribed, and record that it happened.</strong> Whether it does that is still unproven.</p>
+
+  <h2>Studies</h2>
+  {% for study in studies %}
+  <div class="card study">
+    <h3>{{ study.finding }}</h3>
+    <p>{{ study.detail }}</p>
+    <p class="small muted">{{ study.citation }} · <a href="https://doi.org/{{ study.doi }}" target="_blank" rel="noopener">Read the study</a></p>
+  </div>
+  {% endfor %}
+
+  <h2>What EyeQuest hasn't shown</h2>
+  <ul>
+    <li>That it improves vision.</li>
+    <li>That children use it more, or patch for longer, than they would without it.</li>
+    <li>That its eye tracking is accurate for anyone besides its developer. The best result so far missed by 6.6% of the screen's height, for one person on one camera.</li>
+    <li>That Gap Spotter's "smallest ring" measures how well you see. It isn't a validated vision test.</li>
+  </ul>
+
+  <h2>How EyeQuest could be tested</h2>
+  <p class="muted">Any study with children would need an ethics board's approval, parents' consent, and an eye doctor running it.</p>
+  <ol>
+    <li><strong>Tracking check:</strong> compare EyeQuest with a research-grade eye tracker on 10–20 adults.</li>
+    <li><strong>Usability pilot:</strong> children already prescribed patching use EyeQuest for a few weeks, and a patch-wear sensor checks whether its records are accurate.</li>
+    <li><strong>Adherence trial:</strong> patching with EyeQuest versus patching alone, measuring hours actually patched.</li>
+    <li><strong>Vision trial:</strong> only after those succeed, measure vision with examiners who don't know which group each child is in.</li>
+  </ol>
+  <p class="small muted">Sources were checked against their published abstracts in November 2026.</p>
+</main>
+{% endblock %}

@@ -16,6 +16,7 @@ import app as eyequest
 import curriculum
 import gaze
 import progress
+import research
 import start
 
 
@@ -749,3 +750,19 @@ def test_pages_have_a_tab_icon(world):
     client, _, _ = world
     assert "favicon.svg" in client.get("/login").get_data(as_text=True)
     assert client.get("/static/favicon.svg").status_code == 200
+
+
+# ---------- research page ----------
+
+def test_research_page_is_open_to_everyone_and_honest(world):
+    client, _, _ = world
+    page = client.get("/research").get_data(as_text=True)
+    assert "hasn't been tested in any study" in page
+    assert page.count("https://doi.org/") == len(research.STUDIES)
+    assert "research" in client.get("/").get_data(as_text=True)
+
+
+def test_research_page_matches_the_evidence_document():
+    evidence = (Path(__file__).parent.parent / "EVIDENCE.md").read_text()
+    for study in research.STUDIES:
+        assert study["doi"].lower() in evidence.lower()
